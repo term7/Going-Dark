@@ -1733,7 +1733,7 @@ If you ever want to delete this certificate, run:
 sudo security delete-certificate -c "term7-CA" /Library/Keychains/System.keychain
 ```
 
-#### 7. Automatically Renew Certificate on your Raspberry Pi
+#### 8. Automatically Renew Certificate on your Raspberry Pi
 
 Create renew script (it will only run if the certificate expires within 30 days):
 
@@ -1871,7 +1871,19 @@ If the test is successful, restart *NGINX*:
 sudo systemctl restart nginx
 ```
 
-#### 5. Ensure Local Hostname Resolution:
+#### 5. Ensure Local Hostname Resolution, both on your Raspberry Pi and on your Mac:
+
+To allow local resolution of adguard.home, update the /etc/hosts file of your Raspberry Pi:
+```
+sudo sed -i '/127.0.0.1/s/$/\n192.168.77.1    adguard.home/' /etc/hosts
+```
+
+On your Mac:
+```
+grep -q 'adguard.home' /etc/hosts || echo '192.168.77.1    adguard.home' | sudo tee -a /etc/hosts > /dev/null
+```
+
+#### 6. Add adguard.home also to your Mac's host file:
 
 To allow local resolution of adguard.home, update the /etc/hosts file:
 ```
