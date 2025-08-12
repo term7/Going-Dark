@@ -1623,7 +1623,7 @@ Additionally, this certificate will allow *AdGuardHome* to support encrypted DNS
 
 Run the following command to ensure the required directories exist:
 ```
-[ -d ~/tools ] || mkdir ~/tools && [ -d ~/tools/CA ] || mkdir ~/tools/CA && [ -d ~/tools/CA/SSL ] || mkdir ~/tools/CA/SSL
+mkdir -p ~/tools/CA/SSL ~/script/SSL
 ```
 
 #### 2. Create a Self-Signed Certificate Authority (CA):
@@ -1672,7 +1672,7 @@ extendedKeyUsage = serverAuth
 
 [ alt_names ]
 DNS.1 = adguard.home
-IP.1 = 192.168.77.1' | sudo tee /home/admin/tools/CA/SSL/openssl-san.cnf > /dev/null
+IP.1 = 192.168.77.1' | sudo tee /home/admin/tools/CA/SSL/openssl-adguardhome.cnf > /dev/null
 ```
 
 Now, generate the *Private Key* for *adguard.home*:
@@ -1682,12 +1682,12 @@ openssl genrsa -out adguard.home.key 2048
 
 Create a *Certificate Signing Request (CSR)*:
 ```
-openssl req -new -key adguard.home.key -out adguard.home.csr -config openssl-san.cnf
+openssl req -new -key adguard.home.key -out adguard.home.csr -config openssl-adguardhome.cnf
 ```
 
 Sign the *Certificate Signing Request (CSR)* with the *Local Certificate Authority (CA)*:
 ```
-openssl x509 -req -in adguard.home.csr -CA ../term7-CA.pem -CAkey ../term7-CA.key -CAcreateserial -out adguard.home.crt -days 36500 -extensions v3_req -extfile openssl-san.cnf
+openssl x509 -req -in adguard.home.csr -CA ../term7-CA.pem -CAkey ../term7-CA.key -CAcreateserial -out adguard.home.crt -days 90 -extensions v3_req -extfile openssl-adguardhome.cnf
 ```
 
 Create the Full-Chain Certificate:
@@ -1733,57 +1733,101 @@ If you ever want to delete this certificate, run:
 sudo security delete-certificate -c "term7-CA" /Library/Keychains/System.keychain
 ```
 
-#### 8. Automatically Renew Certificate on your Raspberry Pi
+#### 7. Automatically Renew Certificate on your Raspberry Pi
 
-Create renew script (it will only run if the certificate expires within 30 days):
+
+Create renew script (it will only run if certificate expires within 30 days):
 
 ```
-sudo tee /home/admin/tools/CA/SSL/renew-cert.sh > /dev/null << 'EOF'
+sudo tee /home/admin/script/SSL/renew-cert.sh > /dev/null << EOF
 #!/bin/bash
+set -euo pipefail
 
-set -e
+# Where to store the log (overwrite on each run)
+LOG_FILE="/home/admin/script/SSL/renewal.log"
+: > "$LOG_FILE"  # truncate at start
 
+# ----- Timestamp every log line -----
+if command -v ts >/dev/null 2>&1; then
+  exec > >(ts "[%Y-%m-%d %H:%M:%S]" >> "$LOG_FILE") 2>&1
+else
+  exec > >(awk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0; fflush(); }' >> "$LOG_FILE") 2>&1
+fi
+
+# ----- Config -----
 CA_DIR="/home/admin/tools/CA"
 SSL_DIR="$CA_DIR/SSL"
 CA_CERT="$CA_DIR/term7-CA.pem"
 CA_KEY="$CA_DIR/term7-CA.key"
-CNF_FILE="$SSL_DIR/openssl-san.cnf"
-DOMAIN="adguard.home"
+CA_SERIAL="$CA_DIR/term7-CA.srl"
 DAYS=825
+DOMAINS=("adguard.home")
+RESTART_SERVICES=("nginx" "AdGuardHome")
 
-cd "$SSL_DIR"
+# --- Renewal loop ---
+for DOMAIN in "${DOMAINS[@]}"; do
+  CNF_FILE="$SSL_DIR/openssl-${DOMAIN//./}.cnf"
+  CRT_FILE="$SSL_DIR/$DOMAIN.crt"
+  KEY_FILE="$SSL_DIR/$DOMAIN.key"
+  CSR_FILE="$SSL_DIR/$DOMAIN.csr"
+  FULLCHAIN="$SSL_DIR/$DOMAIN-fullchain.crt"
 
-# Only renew if cert expires within 30 days
-openssl x509 -checkend $((30 * 86400)) -noout -in "$DOMAIN.crt" && exit 0
+  if [ ! -f "$CRT_FILE" ]; then
+    DAYS_LEFT=0
+  else
+    ENDLINE="$(openssl x509 -enddate -noout -in "$CRT_FILE" 2>/dev/null || true)"
+    if [[ "$ENDLINE" =~ ^notAfter= ]]; then
+      EXPIRY_RAW="${ENDLINE#notAfter=}"
+      EXPIRY_EPOCH=$(date -d "$EXPIRY_RAW" +%s)
+      NOW_EPOCH=$(date +%s)
+      SECS_LEFT=$(( EXPIRY_EPOCH - NOW_EPOCH ))
+      DAYS_LEFT=$(( SECS_LEFT > 0 ? SECS_LEFT / 86400 : 0 ))
+    else
+      DAYS_LEFT=0
+    fi
+  fi
 
-# Generate new CSR
-openssl req -new -key "$DOMAIN.key" -out "$DOMAIN.csr" -config "$CNF_FILE"
+  if [ "$DAYS_LEFT" -gt 30 ]; then
+    echo "$DOMAIN: certificate expiring in $DAYS_LEFT days — not renewing."
+    continue
+  else
+    echo "$DOMAIN: certificate expiring in $DAYS_LEFT days — renewing..."
+  fi
 
-# Sign the new certificate
-openssl x509 -req \
-  -in "$DOMAIN.csr" \
-  -CA "$CA_CERT" -CAkey "$CA_KEY" -CAcreateserial \
-  -out "$DOMAIN.crt" \
-  -days "$DAYS" \
-  -extensions v3_req -extfile "$CNF_FILE"
+  openssl req -new -key "$KEY_FILE" -out "$CSR_FILE" -config "$CNF_FILE"
+  openssl x509 -req \
+    -in "$CSR_FILE" \
+    -CA "$CA_CERT" -CAkey "$CA_KEY" \
+    -CAserial "$CA_SERIAL" -CAcreateserial \
+    -out "$CRT_FILE" \
+    -days "$DAYS" \
+    -extensions v3_req -extfile "$CNF_FILE"
 
-# Create full-chain
-cat "$DOMAIN.crt" "$CA_CERT" > "$DOMAIN-fullchain.crt"
+  cat "$CRT_FILE" "$CA_CERT" > "$FULLCHAIN"
 
-# Restart AdGuard Home and nginx
-sudo systemctl restart AdGuardHome
-sudo systemctl restart nginx
+  NEW_END="$(openssl x509 -in "$CRT_FILE" -noout -enddate | sed 's/^notAfter=//')"
+  echo "$DOMAIN: new certificate expires on $NEW_END"
+done
+
+# --- Restart services ---
+for svc in "${RESTART_SERVICES[@]}"; do
+  if systemctl is-enabled "$svc" >/dev/null 2>&1 || systemctl is-active "$svc" >/dev/null 2>&1; then
+    sudo systemctl restart "$svc"
+  fi
+done
 EOF
 ```
 
 Make the script executable:
 ```
-sudo chmod +x /home/admin/tools/CA/SSL/renew-cert.sh
+sudo chmod +x /home/admin/script/SSL/renew-cert.sh
 ```
 
 Finally create a cronjob that runs the script at every reboot:
 ```
-( sudo crontab -l 2>/dev/null | grep -v 'renew-cert.sh' ; echo '@reboot /home/admin/tools/CA/SSL/renew-cert.sh >> /home/admin/tools/CA/SSL/renewal.log 2>&1' ) | sudo crontab -
+( sudo crontab -l 2>/dev/null | grep -v 'renew-cert.sh' ; \
+  echo '@reboot /home/admin/script/SSL/renew-cert.sh' \
+) | sudo crontab -
 ```
 
 * * *
@@ -2793,9 +2837,7 @@ sudo nmcli con down torproxy
 
 #### WHAT COMES NEXT:
 
-We are currently taking a break...
-
-... but soon we’ll begin work on a local web-based control interface, which you’ll be able to access from your browser at: [https://going.dark](https://going.dark)
+In the following sections we will show you how to set up a user-friendly control interface that you can reach locally from your browser at: [https://going.dark](https://going.dark)
 
 The web interface will allow you to:
 
@@ -2805,4 +2847,67 @@ The web interface will allow you to:
 - Switch between *VPN mode* and *Tor mode*
 - Clear *AdGuardHome* queries and statistics
 
-In the meantime, we encourage you to thoroughly test our setup. If you encounter bugs, misconfigurations, unclear instructions — or have suggestions for improvements — please let us know. Your feedback helps make this project better.
+## 24 GOING DARK SSL AND NGINX
+
+Before we start building the actual control interface, we create a second configuration for *NGINX* and a second SSL certificate for a new local website that will be called *going.dark*. To do so, we follow a variation of the process outlined in [16 SSL CERTIFICATE](#16-ssl-certificate) and [17 SETUP NGINX REVERSE PROXY](#17-setup-nginx-reverse-proxy), where we created a self-signed SSL certificate for *adguard.home* and where we set up *NGINX* as a reverse proxy for *adguard.home*. We will again use our self-signed certificate authority - *term7-CA* - which we already set up in chapter 16.
+
+
+#### 1. Generate SSL Certificates for going.dark:
+
+Move into the SSL configuration directory:
+```
+cd ~/tools/CA/SSL
+```
+
+Create an *OpenSSL Configuration File* for *going.dark*:
+
+```
+echo '[ req ]
+default_bits       = 2048
+default_md         = sha256
+prompt             = no
+distinguished_name = req_distinguished_name
+req_extensions     = v3_req
+
+[ req_distinguished_name ]
+CN = going.dark
+
+[ v3_req ]
+subjectAltName = @alt_names
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+
+[ alt_names ]
+DNS.1 = going.dark
+IP.1 = 192.168.77.1' | sudo tee /home/admin/tools/CA/SSL/openssl-goingdark.cnf > /dev/null
+```
+
+Now, generate the *Private Key* for *going.dark*:
+```
+openssl genrsa -out ~/tools/CA/SSL/going.dark.key 2048
+```
+
+Create a *Certificate Signing Request (CSR)*:
+```
+openssl req -new -key going.dark.key -out going.dark.csr -config openssl-goingdark.cnf
+```
+
+Sign the *Certificate Signing Request (CSR)* with the existing *Local Certificate Authority (term7-CA)*:
+```
+openssl x509 -req -in ~/tools/CA/SSL/going.dark.csr -CA ~/tools/CA/term7-CA.pem -CAkey ~/tools/CA/term7-CA.key -CAcreateserial -out ~/tools/CA/SSL/going.dark.crt -days 90 -extensions v3_req -extfile ~/tools/CA/SSL/openssl-goingdark.cnf
+```
+
+Create the Full-Chain Certificate:
+```
+cat ~/tools/CA/SSL/going.dark.crt ~/tools/CA/term7-CA.pem > ~/tools/CA/SSL/going.dark-fullchain.crt
+```
+
+You do not need to trust the certificates on your Raspberry Pi and you do not need to transfer your *Local Certificate Authority (term7-CA)* to your Mac, since you have done this in [16 SSL CERTIFICATE](#16-ssl-certificate) already! Also this certificate will automatically renewed once it is close to its expiration date. To add *going.dark* to your existing renewal script, run:
+
+```
+sed -i '/^DOMAINS=(/ {/going\.dark/! s/\(adguard\.home"\)[[:space:]]*)/\1 "going.dark")/ }' /home/admin/script/SSL/renew-cert.sh
+```
+
+
+
+* * *
