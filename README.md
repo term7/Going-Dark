@@ -1898,14 +1898,14 @@ server {
 
 #### 3. Enable the NGINX Configuration:
 
-To activate the newly created NGINX configuration:
+To activate the newly created *NGINX* configuration:
 ```
 sudo ln -s /etc/nginx/sites-available/nginx-adguard /etc/nginx/sites-enabled/
 ```
 
 #### 4. Validate and Restart NGINX:
 
-Before restarting NGINX, test the configuration for syntax errors:
+Before restarting *NGINX*, test the configuration for syntax errors:
 ```
 sudo nginx -t
 ```
@@ -1915,24 +1915,13 @@ If the test is successful, restart *NGINX*:
 sudo systemctl restart nginx
 ```
 
-#### 5. Ensure Local Hostname Resolution, both on your Raspberry Pi and on your Mac:
+#### 5. Ensure Local Hostname Resolution:
 
-To allow local resolution of adguard.home, update the /etc/hosts file of your Raspberry Pi:
+To allow local resolution of adguard.home, run this command on both, your Mac and on your Raspberry Pi:
 ```
-sudo sed -i '/127.0.0.1/s/$/\n192.168.77.1    adguard.home/' /etc/hosts
-```
-
-On your Mac:
-```
-grep -q 'adguard.home' /etc/hosts || echo '192.168.77.1    adguard.home' | sudo tee -a /etc/hosts > /dev/null
+grep -q '192\.168\.77\.1[[:space:]]\+adguard\.home' /etc/hosts || echo '192.168.77.1    adguard.home' | sudo tee -a /etc/hosts > /dev/null
 ```
 
-#### 6. Add adguard.home also to your Mac's host file:
-
-To allow local resolution of adguard.home, update the /etc/hosts file:
-```
-sudo sed -i '/127.0.0.1/s/$/\n192.168.77.1    adguard.home/' /etc/hosts
-```
 
 **⚠️ IMPORTANT: At this stage, the necessary services are configured, but the firewall is not yet set up. Without proper firewall rules, routing will not function as expected, and your setup may not work correctly. The next section will guide you through setting up the firewall. Complete this section first before rebooting your Raspberry Pi.**
 
@@ -2842,19 +2831,18 @@ In the following sections we will show you how to set up a user-friendly control
 The web interface will allow you to:
 
 - Connect the Raspberry Pi to a new Wi-Fi network
-- Safely power off the device
+- Shut down the device safely
 - Start or stop the hotspot
 - Switch between *VPN mode* and *Tor mode*
-- Clear *AdGuardHome* queries and statistics
+- Clear *AdGuardHome* logs and statistics
 
 ## 24 GOING DARK SSL AND NGINX
 
-Before we start building the actual control interface, we create a second configuration for *NGINX* and a second SSL certificate for a new local website that will be called *going.dark*. To do so, we follow a variation of the process outlined in [16 SSL CERTIFICATE](#16-ssl-certificate) and [17 SETUP NGINX REVERSE PROXY](#17-setup-nginx-reverse-proxy), where we created a self-signed SSL certificate for *adguard.home* and where we set up *NGINX* as a reverse proxy for *adguard.home*. We will again use our self-signed certificate authority - *term7-CA* - which we already set up in chapter 16.
-
+Before creating the control interface, we will configure *NGINX* and create a second SSL certificate for a new local website called *going.dark*.  This follows the same basic approach described in [16 SSL CERTIFICATE](#16-ssl-certificate) and [17 SETUP NGINX REVERSE PROXY](#17-setup-nginx-reverse-proxy), , where we generated a self-signed SSL certificate for *adguard.home* and set up *NGINX* as a reverse proxy. as its reverse proxy. We will reuse the existing self-signed certificate authority *term7-CA*.
 
 #### 1. Generate SSL Certificates for going.dark:
 
-Move into the SSL configuration directory:
+Go to the SSL configuration directory:
 ```
 cd ~/tools/CA/SSL
 ```
@@ -2882,7 +2870,7 @@ DNS.1 = going.dark
 IP.1 = 192.168.77.1' | sudo tee /home/admin/tools/CA/SSL/openssl-goingdark.cnf > /dev/null
 ```
 
-Now, generate the *Private Key* for *going.dark*:
+Generate the *Private Key* for *going.dark*:
 ```
 openssl genrsa -out ~/tools/CA/SSL/going.dark.key 2048
 ```
@@ -2902,12 +2890,92 @@ Create the Full-Chain Certificate:
 cat ~/tools/CA/SSL/going.dark.crt ~/tools/CA/term7-CA.pem > ~/tools/CA/SSL/going.dark-fullchain.crt
 ```
 
-You do not need to trust the certificates on your Raspberry Pi and you do not need to transfer your *Local Certificate Authority (term7-CA)* to your Mac, since you have done this in [16 SSL CERTIFICATE](#16-ssl-certificate) already! Also this certificate will automatically renewed once it is close to its expiration date. To add *going.dark* to your existing renewal script, run:
+You do not need to re-trust these certificates on your Raspberry Pi or transfer *Local Certificate Authority (term7-CA)* to your Mac, because that was already completed in [16 SSL CERTIFICATE](#16-ssl-certificate)! To include *going.dark* in your existing certificate renewal script, run:
 
 ```
 sed -i '/^DOMAINS=(/ {/going\.dark/! s/\(adguard\.home"\)[[:space:]]*)/\1 "going.dark")/ }' /home/admin/script/SSL/renew-cert.sh
 ```
 
+#### 2. Create Web Root and Minimal HTML Page for testing:
 
+Create the web root directory:
+```
+sudo mkdir -p /var/www/going.dark
+````
+
+Add a basic test webpage. We will replace this later with the control interface:
+```
+echo '<!DOCTYPE html>
+<html>
+<head>
+  <title>Going Dark</title>
+</head>
+<body>
+  <h1>Welcome to going.dark</h1>
+  <p>This is your simple test site.</p>
+</body>
+</html>' | sudo tee /var/www/going.dark/index.html > /dev/null
+```
+
+Set the correct ownership:
+```
+sudo chown -R www-data:www-data /var/www/going.dark
+```
+
+#### 3. Configure NGINX as a reverse proxy for Going.Dark:
+
+Create the *NGINX* configuration:
+
+```
+echo 'server {
+    listen 443 ssl http2;
+
+    server_name going.dark;
+
+    ssl_certificate /home/admin/tools/CA/SSL/going.dark-fullchain.crt;
+    ssl_certificate_key /home/admin/tools/CA/SSL/going.dark.key;
+
+    location / {
+        root /var/www/going.dark;
+        index index.html;
+    }
+}
+
+server {
+    listen 80;
+    server_name going.dark;
+
+    return 301 https://$host$request_uri;
+}' | sudo tee /etc/nginx/sites-available/nginx-goingdark > /dev/null
+```
+
+Enable the new *NGINX* site configuration:
+```
+sudo ln -s /etc/nginx/sites-available/nginx-goingdark /etc/nginx/sites-enabled/
+```
+
+Check the configuration for errors:
+
+```
+sudo nginx -t
+```
+
+If the test passes, restart *NGINX*:
+```
+sudo systemctl restart nginx
+```
+
+#### 4. Ensure Local Hostname Resolution:
+
+Add *going.dark* to your '/etc/hosts' file on both your Mac and your Raspberry Pi so it resolves locally:
+```
+sudo sed -i.bak 's/\(adguard\.home\)\([^ ]*\)/\1 going.dark\2/' /etc/hosts && sudo rm -f /etc/hosts.bak
+```
+
+#### 5. Visit your test site:
+
+To confirm everything is set up correctly, open a web browser on your Mac and go to: [https://going.dark](https://going.dark)
+
+You should see the simple test page you created earlier.
 
 * * *
