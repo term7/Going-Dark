@@ -203,6 +203,7 @@ An active cooling system to prevent overheating, especially during hot summer da
 
 However, if you're interested, you might want to check out: [Z-Ram Tweaks](https://term7.info/intro-raspberry-pi/#Z-RAM): These optimizations can improve system performance, especially on low-memory setups.<br>
 [MOTD Tweaks](https://term7.info/intro-raspberry-pi/#MOTD): Customizing the Message of the Day (MOTD) can enhance your login experience with useful system info. Both tweaks are optional but can be beneficial.<br>
+[LED'S OFF](https://term7.info/intro-raspberry-pi/#LED): Switch off all LED's and your Raspberry Pi will run completely dark, free from any status lights.<br>
 Skip the sections on user access management, SSH hardening, and firewall setup. These will be fully covered in this tutorial!
 
 #### EXPAND FILE SYSTEM AND ENABLE PREDICTABLE INTERFACE NAMES
