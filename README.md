@@ -30,6 +30,7 @@ This repository is both a guide and a step-by-step tutorial for configuring a Ra
 - [21 WIREGUARD VPN](#21-wireguard-vpn)
 - [22 TOR TRANSPARENT PROXY](#22-tor-transparent-proxy)
 - [23 LOCAL WEB CONTROL INTERFACE](#23-local-web-control-interface)
+- [24 GOING DARK BASIC SETUP](#24-going-dark-basic-setup)
 
 * * *
 
@@ -2836,7 +2837,7 @@ The web interface will allow you to:
 - Switch between *VPN mode* and *Tor mode*
 - Clear *AdGuardHome* logs and statistics
 
-## 24 GOING DARK SSL AND NGINX
+## 24 GOING DARK BASIC SETUP
 
 Before creating the control interface, we will configure *NGINX* and create a second SSL certificate for a new local website called *going.dark*.  This follows the same basic approach described in [16 SSL CERTIFICATE](#16-ssl-certificate) and [17 SETUP NGINX REVERSE PROXY](#17-setup-nginx-reverse-proxy), , where we generated a self-signed SSL certificate for *adguard.home* and set up *NGINX* as a reverse proxy. as its reverse proxy. We will reuse the existing self-signed certificate authority *term7-CA*.
 
