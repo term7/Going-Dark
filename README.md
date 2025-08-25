@@ -612,7 +612,7 @@ Now, reboot your Raspberry Pi:
 sudo reboot now
 ```
 
-After the system restarts, run the following command again:
+After the system restarts, log into your Raspberry Pi (double-check what IP-address has been assigend to it - it likely will have a new IP-address after a MAC address change!) and run the following command again:
 ```
 sudo nmcli device show | grep GENERAL.HWADDR
 ```
@@ -1257,14 +1257,19 @@ dscacheutil -flushcache
 
 When MAC address randomization is enabled, *Dnsmasq* may assign a different IP address upon reboot because it sees a new MAC address. To ensure that *AdGuardHome* consistently recognizes WORKSTATION with the correct static IP, we need to clear the `/var/lib/NetworkManager/dnsmasq-usb0.leases` file before *NetworkManager* starts.
 
-Logged into your Raspberry Pi as *admin*, create the Cleanup Script:
+Logged into your Raspberry Pi as *admin*, prepare the Script Storage Location:<br>
+```
+[ -d ~/script ] || mkdir ~/script && [ -d ~/script/DNS ] || mkdir ~/script/DNS
+```
+
+Next, create the Cleanup Script:
 
 ```
 echo '#!/bin/bash
 > /var/lib/NetworkManager/dnsmasq-usb0.leases' | sudo tee ~/script/DNS/clear-usb0-leases.sh > /dev/null
 ```
 
-Make the script executable:
+Make the script executable:<br>
 ```
 sudo chmod +x ~/script/DNS/clear-usb0-leases.sh
 ```
@@ -1447,12 +1452,7 @@ Later in this guide, we will configure an *Nginx Reverse Proxy* to serve the *Ad
 This setup does not work out of the box due to two key issues: *Dnsmasq* generates a zone file that is incompatible with *Unbound’s* syntax. To resolve this, we need a script that translates the lease file into a format that *Unbound* can read.<br>
 Furthermore *Dnsmasq* needs to trigger this script whenever a new client connects. This ensures automatic updates to *Unbound’s* zone file, keeping hostname resolution accurate.
 
-Prepare the Script Storage Location:<br>
-```
-[ -d ~/script ] || mkdir ~/script && [ -d ~/script/DNS ] || mkdir ~/script/DNS
-```
-
-Now, create the script that translates *NetworkManager’s* lease file into a format that is compatible with *Unbound*:
+Create the script that translates *NetworkManager’s* lease file into a format that is compatible with *Unbound*:
 
 ```
 sudo tee /home/admin/script/DNS/update-unbound-leases.sh > /dev/null << 'EOF'
@@ -1647,6 +1647,18 @@ openssl req -x509 -new -nodes \
   -addext "keyUsage=critical,keyCertSign,cRLSign"
 ```
 
+Make sure the files are owned by *root* and have the correct permissions:
+```
+sudo chown root:root term7-CA.key term7-CA.pem term7-CA.srl
+```
+```
+sudo chmod 600 term7-CA.key
+```
+```
+sudo chmod 644 term7-CA.pem term7-CA.srl
+```
+
+
 #### 3. Generate SSL Certificates for adguard.home:
 
 Move into the SSL configuration directory:
@@ -1689,7 +1701,7 @@ openssl req -new -key adguard.home.key -out adguard.home.csr -config openssl-adg
 
 Sign the *Certificate Signing Request (CSR)* with the *Local Certificate Authority (CA)*:
 ```
-openssl x509 -req -in adguard.home.csr -CA ../term7-CA.pem -CAkey ../term7-CA.key -CAcreateserial -out adguard.home.crt -days 90 -extensions v3_req -extfile openssl-adguardhome.cnf
+sudo openssl x509 -req -in adguard.home.csr -CA ../term7-CA.pem -CAkey ../term7-CA.key -CAcreateserial -out adguard.home.crt -days 90 -extensions v3_req -extfile openssl-adguardhome.cnf
 ```
 
 Create the Full-Chain Certificate:
@@ -1741,13 +1753,15 @@ sudo security delete-certificate -c "term7-CA" /Library/Keychains/System.keychai
 Create renew script (it will only run if certificate expires within 30 days):
 
 ```
-sudo tee /home/admin/script/SSL/renew-cert.sh > /dev/null << EOF
+sudo tee /home/admin/script/SSL/renew-cert.sh > /dev/null <<'EOF'
 #!/bin/bash
 set -euo pipefail
+umask 077
 
 # Where to store the log (overwrite on each run)
 LOG_FILE="/home/admin/script/SSL/renewal.log"
-: > "$LOG_FILE"  # truncate at start
+mkdir -p "$(dirname "$LOG_FILE")"
+: > "$LOG_FILE"
 
 # ----- Timestamp every log line -----
 if command -v ts >/dev/null 2>&1; then
