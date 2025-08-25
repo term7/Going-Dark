@@ -2222,7 +2222,7 @@ In this section, we’ll briefly cover DNS blocklists and allowlists — two ess
 
 #### Custom Filtering Rules
 
-n this section, we explicitly allow the domain `check.torproject.org`:
+In this section, we explicitly allow the domain `check.torproject.org`:
 
 ```
 ! Allow Tor Check
@@ -2898,7 +2898,7 @@ openssl req -new -key going.dark.key -out going.dark.csr -config openssl-goingda
 
 Sign the *Certificate Signing Request (CSR)* with the existing *Local Certificate Authority (term7-CA)*:
 ```
-openssl x509 -req -in ~/tools/CA/SSL/going.dark.csr -CA ~/tools/CA/term7-CA.pem -CAkey ~/tools/CA/term7-CA.key -CAcreateserial -out ~/tools/CA/SSL/going.dark.crt -days 90 -extensions v3_req -extfile ~/tools/CA/SSL/openssl-goingdark.cnf
+sudo openssl x509 -req -in ~/tools/CA/SSL/going.dark.csr -CA ~/tools/CA/term7-CA.pem -CAkey ~/tools/CA/term7-CA.key -CAcreateserial -out ~/tools/CA/SSL/going.dark.crt -days 90 -extensions v3_req -extfile ~/tools/CA/SSL/openssl-goingdark.cnf
 ```
 
 Create the Full-Chain Certificate:
