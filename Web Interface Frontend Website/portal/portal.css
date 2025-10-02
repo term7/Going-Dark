@@ -418,6 +418,9 @@ label[for="hotspot-password"] {
 /* =========================================
    9) Hotspot Section — flex wrap layout
    ========================================= */
+/* =========================================
+   9) Hotspot Section — flex wrap layout
+   ========================================= */
 .hotspot-grid {
   display: flex;
   flex-wrap: wrap;
@@ -474,6 +477,21 @@ label[for="hotspot-password"] {
   pointer-events: none;
   text-align: right;
   font-size: 12px;
+}
+
+/* Remove default flex gap in left column so we can control spacing precisely */
+#hotspot-card .hotspot-left { gap: 0; }
+
+/* Button → Connected Clients line = 0.5rem */
+#hotspot-card .hotspot-toprow { margin-bottom: .5rem; }
+#hotspot-card .portal-btnbar + #hotspot-clients { margin-top: 0 !important; }
+
+/* Connected Clients line → form = 1rem (matches Wi-Fi card rhythm) */
+#hotspot-card #hotspot-clients { margin-bottom: 1rem; }
+
+/* Tighten the first hotspot form row so it doesn’t double-space */
+#hotspot-card #hotspot-form .portal-row:first-of-type {
+  margin-top: 0;
 }
 
 /* =========================================
