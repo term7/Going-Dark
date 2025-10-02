@@ -1,0 +1,18 @@
+[Unit]
+Description=Config App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=term7
+Group=term7
+WorkingDirectory=/home/term7/config
+Environment="PYTHONUNBUFFERED=1"
+Environment="PATH=/home/term7/config/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+ExecStart=/home/term7/config/.venv/bin/python -m gunicorn -w 2 -k gthread --threads 8 --bind 127.0.0.1:5002 --access-logfile - --error-logfile - config:app
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

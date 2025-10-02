@@ -1,0 +1,353 @@
+/* =========================================
+   0) File Overview — config.css for /config panel
+   =========================================
+
+What this stylesheet does (visual behavior):
+
+- Styles the two-column configuration page embedded under /config/.
+- LEFT column: fixed-width MOTD panel (header / dynamic / footer).
+- RIGHT column: device actions (shutdown/reboot) and an analog clock card.
+- Uses monospace metrics with ch-based widths so ASCII/figlet blocks align.
+- Buttons are full-width, stacked; small statusline sits below.
+
+JS interaction map (who updates what):
+
+- config.js
+  • (§4/§5/§9) updates MOTD values (#si-date, #stat-uptime, #stat-load, #stat-mem, #stat-procs, #stat-swap, #stat-temp).
+  • (§6) draws/sizes the analog clock on #clock; (§7) refreshes NTP labels (#ntp-server, #ntp-ip).
+  • (§8) intercepts power forms; notifies parent window → power.js dims/undims.
+- power.js (main site)
+  • (§8) responds to postMessage from /config/ iframe; dims body and refreshes iframe on recovery.
+
+Section map (in this file):
+
+1) Fonts & Root Variables
+2) Base / Transparency / Selection
+3) Grid Layout (left MOTD fixed width, right actions flexible)
+4) Typography
+5) Status & Info Lines
+6) Buttons (full-width, stacked)
+7) Analog Clock Card
+*/
+
+
+/* =========================================
+   1) Fonts & Root Variables
+   ========================================= */
+@font-face {
+  font-family: "ANON-DIGITAL";
+  src: url("/assets/fonts/ANON-DIGITAL_normal.woff2") format("woff2"),
+       url("/assets/fonts/ANON-DIGITAL_normal.woff")  format("woff"),
+       url("/assets/fonts/ANON-DIGITAL_normal.ttf")   format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+
+  --config-bg: transparent;
+  --config-fg: #0b0b0b;
+  --config-green: #22c55e;
+  --config-red: #ff0000;
+
+  /* Cards */
+  --card-bg: rgba(255, 255, 255, 0.12); /* slightly stronger so it’s visible */
+
+  /* MOTD width (columns) — change if you want 72/80/100 cols etc. */
+  --motd-cols: 78;
+}
+
+/* =========================================
+   2) Base / Transparency / Selection
+   ========================================= */
+::selection { background: #2A2A2A; color: var(--config-green); }
+::-moz-selection { background: #2A2A2A; color: var(--config-green); }
+
+html, body { background: transparent !important; }
+html, body { height: 100%; }
+
+body::-webkit-scrollbar,
+html::-webkit-scrollbar { display: none; }
+html { scrollbar-width: none; -ms-overflow-style: none; }
+body { scrollbar-width: none; -ms-overflow-style: none; }
+
+body {
+  margin: 0;                   /* no margin—use padding instead */
+  padding: 1.5rem;             /* same visual gutter */
+  box-sizing: border-box;      /* padding stays inside the 100% height */
+  overflow: auto;              /* scroll only if content truly exceeds */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: var(--config-bg) !important;
+  color: var(--config-fg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+#app, #root, .app, .root { background: transparent !important; }
+
+/* =========================================
+   3) Grid Layout (left motd fixed width, right actions flexible)
+   ========================================= */
+.config-grid {
+  display: grid;
+  grid-template-columns: calc(var(--motd-cols) * 1ch) minmax(0, 1fr);
+  column-gap: 0;   /* <-- no space between columns */
+  row-gap: 1rem;   /* keep vertical spacing between rows */
+  align-items: start;
+  width: 100%;
+  margin-top: 1.5rem;
+}
+
+/* Add extra scroll space below the last card */
+.config-grid::after {
+  content: "";
+  display: block;
+  height: 2.5rem;
+}
+
+.config-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.card {
+  background: var(--card-bg);
+  border: none;
+  border-radius: 0;
+  padding: 1rem 1.25rem;
+  box-shadow: none;
+  min-width: 0;
+}
+
+/* Make the actions card a size container for container queries */
+#actions-card { container-type: inline-size; }
+
+/* Left column / MOTD */
+.motd-card {
+  background: transparent;
+  padding: 0; /* make sure there’s no internal padding adding space */
+  inline-size: calc(var(--motd-cols) * 1ch);
+  max-inline-size: calc(var(--motd-cols) * 1ch);
+}
+
+/* JS INTERACTION (config.js §4/§5/§9):
+   - Text inside the MOTD blocks is updated by time/stats loops.
+   - IDs targeted by JS: #si-date, #stat-uptime, #stat-load, #stat-mem, #stat-procs, #stat-swap, #stat-temp. */
+.motd-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  -moz-user-select: none;
+  background: transparent;
+  display: block;
+  /* Terminal-like width using ch units (exact character cells) */
+  inline-size: calc(var(--motd-cols) * 1ch);
+  max-inline-size: calc(var(--motd-cols) * 1ch);
+  pointer-events: none;
+  color: var(--config-red);
+
+  /* ---- Readability tweaks ---- */
+  line-height: 1.28;     /* MORE VERTICAL BREATHING ROOM */
+  letter-spacing: 0;     /* undo global 0.5px so columns align with ch */
+}
+
+/* Preserve spacing + bold for figlet and ASCII art*/
+.motd-strong-pre {
+  white-space: pre;   /* preserve leading spaces */
+  display: block;
+  font-weight: 700;   /* bold for visibility */
+  font-family: inherit;
+}
+
+/* JS INTERACTION (config.js §4/§5):
+   - .motd-val spans wrap dynamic values (date/uptime/stats). */
+.motd-val,
+.motd-strong {
+  font-weight: 600; /* Bold values and specific header blocks */
+}
+
+/* Collapse to single column on medium/small widths */
+@media (max-width: 900px) {
+  .config-grid { grid-template-columns: 1fr; }
+}
+
+/* =========================================
+   4) Typography
+   ========================================= */
+.config-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+/* =========================================
+   5) Status & Info Lines
+   ========================================= */
+
+/* Container for status/info lines — flex with wrap auto-stacks when narrow */
+.config-status {
+  color: var(--config-fg);
+  background: transparent;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1rem;  /* space between the two halves */
+  row-gap: 0;        /* no extra vertical gap between rows */
+}
+
+/* Each key/value block (hostname, MAC) */
+
+.config-kv {
+  flex: 1 1 18ch;   /* tweak 18ch to adjust the collapse point */
+  min-width: 0;
+  margin: 0;
+}
+
+/* Label line: normal weight, inline (your HTML provides the <br/>) */
+.config-kv-label {
+  font-weight: 400;
+  display: inline;
+}
+
+/* Value line: bold + default gap below */
+.config-kv-value {
+  display: block;
+  font-weight: 600;
+  word-break: break-word;
+  margin: 0 0 0.75rem 0; /* gap under values */
+}
+
+/* Bigger gap before buttons (applies to the last KV = MAC) */
+.config-status .config-kv:last-child .config-kv-value {
+  margin-bottom: 1.5rem;
+}
+
+/* JS INTERACTION (config.js §8 and power.js §8 onMessage):
+   - The statusline communicates reboot note; visual spacing aligns with JS-triggered dim UX.
+   - POWER.JS INTERACTION: §8 listens for {type:'power',action} and toggles <body>.power-dim. */
+.config-statusline {
+  margin-top: .5rem;         /* space from button bar */
+  color: var(--config-red);  /* match portal red */
+  user-select: none;
+  pointer-events: none;
+  font-size: 12px;           /* small status text like portal */
+}
+
+/* Ensure consistent spacing when placed right after the button bar */
+.card .config-btnbar + .config-statusline {
+  margin-top: .5rem;
+}
+
+
+/* =========================================
+   6) Buttons (full-width, stacked)
+   ========================================= */
+
+/* JS INTERACTION (config.js §8 Power Actions Intercept):
+   - JS intercepts submits from #form-shutdown and #form-reboot inside .config-btnbar. */
+.config-btnrow {
+  display: flex;
+  flex-direction: column; /* stack vertically */
+  gap: 0.6rem;
+  width: 100%;
+}
+
+/* JS INTERACTION (config.js §8 Power Actions Intercept & power.js §8 onMessage):
+   - Forms submit via fetch; parent window is notified to dim via postMessage.
+   - POWER.JS INTERACTION: §8 receives these messages and dims immediately,
+     then undims after §7 tick() confirms /config/health is OK and §6 reloadConfigIframe() refreshes. */
+.config-btnbar { display: flex; width: 100%; margin: 0; }
+.config-btnbar .config-form { display: contents; }
+
+.config-btn {
+  appearance: none;
+  background: var(--config-red);
+  color: white;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.6rem 1rem;
+  font-size: clamp(16px, 1.6vw, 21px);
+  font-family: "ANON-DIGITAL", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-decoration: none;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  box-sizing: border-box;
+  inline-size: 100%;   /* full width of the card */
+  min-inline-size: 0;  /* don't force a min character width */
+  flex: none;          /* prevent flex growth/shrink weirdness */
+}
+
+.config-btn:hover,
+.config-btn:focus-visible { background: var(--config-green); outline: none; }
+.config-btn:active         { background: var(--config-green); }
+
+/* =========================================
+   7) Analog Clock Card
+   ========================================= */
+
+/* JS INTERACTION (config.js §6 Analog Clock / §9 Boot):
+   - #clock-card is sized/observed; canvas is resized/redrawn each second. */
+.clock-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  /* remove left/right padding so dashed rules can span the full card width */
+  padding-left: 0;
+  padding-right: 0;
+  padding-bottom: 1.25rem;
+  text-align: center;              /* center all text below clock */
+
+  /* disable interaction by default */
+  user-select: none;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* JS INTERACTION (config.js §6 drawClock / resizeClock):
+   - The script sets explicit pixel width/height and handles drawing. */
+#clock {
+  display: block;
+  margin: 0 auto;
+  /* JS sets explicit pixel width/height; ensure we never overflow */
+  max-width: 100%;
+  height: auto;
+  background: transparent;
+  image-rendering: crisp-edges;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* JS INTERACTION (config.js §7 refreshNtp):
+   - Text content of #ntp-server and #ntp-ip (inside .clock-info spans) is updated periodically. */
+.clock-info {
+  color: var(--config-red);
+  margin-top: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  letter-spacing: 0;       /* exact character cell width for dashes */
+  white-space: pre;        /* do not collapse dash runs */
+}
+.clock-info:first-of-type {
+  margin-top: 1rem;                /* empty line between clock and info */
+}
+
+/* Link: red, bold, underlined; hover -> portal green */
+.clock-card a {
+  pointer-events: auto;            /* re-enable interaction for links */
+  cursor: pointer;
+  color: var(--config-red);
+  text-decoration: underline;
+  font-weight: 700;
+}
+.clock-card a:hover,
+.clock-card a:focus-visible {
+  color: var(--config-green);
+}

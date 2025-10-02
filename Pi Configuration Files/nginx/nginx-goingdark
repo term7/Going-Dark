@@ -1,35 +1,136 @@
 server {
-    listen 443 ssl http2;
-
+    listen 192.168.77.1:443 ssl http2;
     server_name going.dark;
 
-    ssl_certificate /home/admin/tools/CA/SSL/going.dark-fullchain.crt;
+    ssl_certificate     /home/admin/tools/CA/SSL/going.dark-fullchain.crt;
     ssl_certificate_key /home/admin/tools/CA/SSL/going.dark.key;
 
+    # ---- Minimal global hardening ----
+    add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), bluetooth=(), midi=(), usb=()" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Strict-Transport-Security "max-age=15552000" always;  # ~180 days
+
+    # ---- Static site root ----
     location / {
-        root /var/www/going.dark;
+        root  /var/www/going.dark;
         index index.html;
     }
 
-    # ensure /wifi redirects to /wifi/ so relative paths work
-    location = /wifi {
-        return 301 /wifi/;
+    # ---- Canonicalize /portal -> /portal/ ----
+    location = /portal { return 301 /portal/; }
+
+    # ---- Serve portal assets as static files ----
+    location = /portal/portal.css {
+        alias /var/www/going.dark/portal/portal.css;
+        default_type text/css;
+        add_header Cache-Control "public, max-age=300";
+    }
+    location = /portal/portal.js {
+        alias /var/www/going.dark/portal/portal.js;
+        default_type application/javascript;
+        add_header Cache-Control "public, max-age=300";
     }
 
-    # proxy /wifi/ to the Flask app on localhost:5001
-    location /wifi/ {
+    # ---- Proxy /portal/ to the Flask app on localhost:5001 ----
+    location /portal/ {
         proxy_pass http://127.0.0.1:5001/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
     }
+
+    # ---- Canonicalize /config -> /config/ ----
+    location = /config { return 301 /config/; }
+
+    # ---- Serve config assets as static files ----
+    location = /config/config.css {
+        alias /var/www/going.dark/config/config.css;
+        default_type text/css;
+        add_header Cache-Control "public, max-age=300";
+    }
+    location = /config/config.js {
+        alias /var/www/going.dark/config/config.js;
+        default_type application/javascript;
+        add_header Cache-Control "public, max-age=60";
+    }
+
+    # ---- Proxy /config/ to the Flask app on localhost:5002 ----
+    location /config/ {
+        proxy_pass http://127.0.0.1:5002/;
+
+        # Standard proxy headers
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 60s;
+    }
+
+    # ---- Canonicalize /adguard -> /adguard/ ----
+    location = /adguard { return 301 /adguard/; }
+
+    # ---- Same-origin path mount of AdGuard Home UI under /adguard/ ----
+    location ^~ /adguard/ {
+        # Strip the /adguard/ prefix before proxying upstream
+        proxy_pass http://127.0.0.1:3000/;
+
+        # Headers
+        proxy_set_header Host              adguard.home;   # upstream expects this
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support (live updates/logs)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout  300s;
+        proxy_send_timeout  300s;
+
+        # Cookie & path scoping so sessions are first-party to going.dark under /adguard/
+        proxy_cookie_domain adguard.home going.dark;
+        proxy_cookie_path   /           /adguard/;
+
+        # ---- Rewrite upstream redirects (Location headers) to stay under /adguard/ ----
+        proxy_redirect ~^(/.*)$ /adguard$1;
+        proxy_redirect http://127.0.0.1:3000/  /adguard/;
+        proxy_redirect https://127.0.0.1:3000/ /adguard/;
+        proxy_redirect https://adguard.home/   /adguard/;
+
+        # ---- Rewrite in-body root-relative URLs (HTML/CSS/JS/JSON) ----
+        proxy_set_header Accept-Encoding "";   # allow sub_filter to see text (disable upstream compression)
+        sub_filter_once off;
+        sub_filter_types text/html text/css application/javascript application/json;
+
+        sub_filter 'href="/'               'href="/adguard/';
+        sub_filter 'src="/'                'src="/adguard/';
+        sub_filter 'action="/'             'action="/adguard/';
+        sub_filter 'content="/'            'content="/adguard/';
+        sub_filter 'url(/'                 'url(/adguard/';
+        sub_filter 'fetch("/'              'fetch("/adguard/';
+        sub_filter "fetch('/"              "fetch('/adguard/";
+        sub_filter 'XMLHttpRequest("/'     'XMLHttpRequest("/adguard/';
+        sub_filter "XMLHttpRequest('/"     "XMLHttpRequest('/adguard/";
+
+        # Avoid caching admin UI/API
+        add_header Cache-Control "no-store" always;
+
+        # ---- Silence ad-tech header ----
+        proxy_hide_header Permissions-Policy;
+        proxy_hide_header Origin-Trial;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), bluetooth=(), midi=(), usb=()" always;
+    }
 }
 
+# HTTP -> HTTPS redirect for going.dark
 server {
-    listen 80;
+    listen 192.168.77.1:80;
     server_name going.dark;
-
     return 301 https://$host$request_uri;
 }

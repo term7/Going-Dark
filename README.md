@@ -7,6 +7,8 @@ If you haven’t gone dark yet, now is the time!
 
 This repository is both a guide and a step-by-step tutorial for configuring a Raspberry Pi 4 as a USB Ethernet Gadget. It forces your computer to route all internet traffic through either a WireGuard VPN or a Tor Transparent Proxy while filtering outbound traffic, blocking ads and trackers, and spoofing its device identity for enhanced privacy.
 
+## PART 1: BACKEND
+
 - [01 INTRODUCTION](#01-introduction)
 - [02 FEATURES](#02-features)
 - [03 PREREQUISITES](#03-prerequisites)
@@ -29,10 +31,19 @@ This repository is both a guide and a step-by-step tutorial for configuring a Ra
 - [20 DNS BLOCKLISTS](#20-dns-blocklists)
 - [21 WIREGUARD VPN](#21-wireguard-vpn)
 - [22 TOR TRANSPARENT PROXY](#22-tor-transparent-proxy)
-- [23 LOCAL WEB CONTROL INTERFACE](#23-local-web-control-interface)
-- [24 GOING DARK BASIC SETUP](#24-going-dark-basic-setup)
+- [23 COMMANDS SUMMARY](#23-commands-summary)
+
+## PART 2: FRONTEND
+
+- [24 GOAL](#24-goal)
+- [25 MODIFY USER PERMISSIONS](#25-modify-user-permissions)
+- [26 GOING DARK NGINX SSL SETUP](#26-going-dark-nginx-ssl-setup)
+- [27 CREATE FLASK APPS](#27-create-flask-apps)
+- [28 DOWNLOAD WEB CONTROL INTERFACE](#28-download-web-control-interface)
 
 * * *
+
+# PART 1: BACKEND
 
 ## 01 INTRODUCTION
 
@@ -1873,7 +1884,7 @@ Run the following command to create the configuration:
 
 ```
 echo 'server {
-    listen 443 ssl http2;
+    listen 192.168.77.1:443 ssl http2;
 
     server_name adguard.home;
 
@@ -1904,7 +1915,7 @@ echo 'server {
 }
 
 server {
-    listen 80;
+    listen 192.168.77.1:80;
     server_name adguard.home;
 
     # Redirect HTTP to HTTPS
@@ -2798,7 +2809,7 @@ If you see your home IP address, or the IP of a DNS resolver you've configured m
 
 * * *
 
-## 23 LOCAL WEB CONTROL INTERFACE
+## 23 COMMANDS SUMMARY
 
 At this point, your Raspberry Pi should be fully functional and operating as intended. For now, switching between different modes still requires logging in via SSH and using the command line from your `admin` account.
 
@@ -2842,19 +2853,113 @@ sudo nmcli con down torproxy
 
 #### WHAT COMES NEXT:
 
-In the following sections we will show you how to set up a user-friendly control interface that you can reach locally from your browser at: [https://going.dark](https://going.dark)
+This was **Part 1** of this repository. In the following sections of **Part 2** we will show you how to set up a user-friendly control interface that you can reach locally from your browser at: [https://going.dark](https://going.dark)
 
-The web interface will allow you to:
+* * *
+
+# PART 2: FRONTEND
+
+## 24 GOAL
+
+This is the beginnig of **Part 2**.
+
+In **Part 1** of this guide, we built the backend services on the Raspberry Pi. Now it’s time to bring everything together in a local web interface that runs directly on the Pi and makes those services easy to control.
+The interface is served locally over USB-C (`192.168.77.1`) to your workstation. It integrates two Flask applications (installed under your standard user account, *term7*):
+
+`portal.py` - manages network-related features such as *VPN*, *Tor Proxy*, and *Hotspot*.
+`config.py` - controls system functions such as shutdown, reboot, automatically issuing a new random hostname and MAC address, and displaying system diagnostics and clock information.
+
+Both applications provide simple button-based controls. In addition, the interface embeds the *AdGuard Home* control panel we configured earlier in **Part 1**.
+
+In the following steps, we will:
+
+- Install the additional required components.
+- Configure the necessary user permissions (*term7*).
+- Set up dedicated virtual environments for the Flask applications.
+- Download the required Python scripts from this repository.
+- Deploy the complete web interface by downloading its code into `/var/www/going.dark`.
+
+Please note:
+
+**⚠️ Warning: Always review any code before downloading or running it. Do not blindly trust this guide, or any guide. Verify that the code is legitimate and safe. If you discover mistakes, unused code, or have suggestions for improvements, please let us know!**
+
+The completed web control interface will allow you to:
 
 - Connect the Raspberry Pi to a new Wi-Fi network
-- Shut down the device safely
-- Start or stop the hotspot
-- Switch between *VPN mode* and *Tor mode*
-- Clear *AdGuardHome* logs and statistics
+- Disconnect from Wi-Fi to go offline
+- Switch between *VPN mode*, *Tor mode*, and *Clearnet mode*
+- Start or stop the *hotspot*
+- Change *hotspot* credentials
+- Generate a QR code for quick *hotspot* access from mobile devices
+- Shut down or reboot the Raspberry Pi at the click of a button
+- View system diagnostics and status
+- Check the system clock and NTP synchronization
+- Log into *AdGuard Home* directly
 
-## 24 GOING DARK BASIC SETUP
+* * *
 
-Before creating the control interface, we will configure *NGINX* and create a second SSL certificate for a new local website called *going.dark*.  This follows the same basic approach described in [16 SSL CERTIFICATE](#16-ssl-certificate) and [17 SETUP NGINX REVERSE PROXY](#17-setup-nginx-reverse-proxy), , where we generated a self-signed SSL certificate for *adguard.home* and set up *NGINX* as a reverse proxy. as its reverse proxy. We will reuse the existing self-signed certificate authority *term7-CA*.
+## 25 MODIFY USER PERMISSIONS
+
+Running Flask applications under a standard user account with carefully restricted `sudo` permissions reduces the attack surface, avoids accidental system-wide changes, and follows established security best practices. For this reason, we will later install our Flask apps under the standard user account (*term7*). To enable the required functionality, however, *term7* must be granted superuser privileges for a small set of commands, specifically those needed to manage networking (`nmcli`), scan for Wi-Fi networks (`iw`), and perform system actions like `reboot` and `shutdown`.
+
+#### 1. Log in as admin
+
+Switch to your *admin* account:  
+```
+su admin
+```
+
+#### 2. Add a polkit rule for NetworkManager
+
+Create a new polkit rule to grant *term7* the necessary NetworkManager privileges:  
+
+```
+sudo sh -c 'cat >/etc/polkit-1/rules.d/10-allow-term7-nm.rules << "EOF"
+polkit.addRule(function(action, subject) {
+  if (subject.user == "term7") {
+    if (
+      action.id == "org.freedesktop.NetworkManager.network-control" ||
+      action.id == "org.freedesktop.NetworkManager.settings.modify.system" ||
+      action.id == "org.freedesktop.NetworkManager.wifi.share.open" ||
+      action.id == "org.freedesktop.NetworkManager.wifi.share.protected" ||
+      action.id == "org.freedesktop.NetworkManager.enable-disable-wifi"
+    ) {
+      return polkit.Result.YES;
+    }
+  }
+});
+EOF'
+```
+
+Restart polkit to apply the new rule:  
+```
+sudo systemctl restart polkit || sudo systemctl restart polkit-1
+```
+
+#### 3. Extend sudoers for selected commands
+
+In [04 USER ACCESS CONTROL](#04-user-access-control) we already configured `/etc/sudoers.d/common_users` to allow *term7* to run `reboot` and `shutdown`.  
+
+Now we will extend that file with additional privileges for:  
+- `iw` (Wi-Fi scan and station dump)  
+- A tight `nmcli` command that only reveals the Hotspot PSK. This is needed later when the Flask app generates a QR code (using *segno*) after the user enters a new SSID and password and confirms with *Enter*.  
+
+Run the following:  
+
+```
+NMCLI="$(command -v nmcli)"
+IW="$(command -v iw)"
+
+sudo sed -i "s|\$|, ${IW} dev wlx00c0caae6319 scan trigger, ${IW} dev wlx00c0caae6319 scan dump, ${IW} dev wlan0 station dump, ${NMCLI} -s -g 802-11-wireless-security.psk connection show Hotspot|" /etc/sudoers.d/common_users
+```
+
+Privileges are split between polkit and sudoers for a reason. *NetworkManager* operations such as connecting, disconnecting, and managing profiles are handled through polkit, since these map cleanly to its D-Bus actions and are considered safe for a standard user once explicitly allowed. By contrast, commands like *Wi-Fi scanning*, retrieving the *Hotspot PSK*, or performing system-level actions such as *reboot* and *shutdown* remain locked down in *sudoers*. This separation ensures that *term7* has only the precise permissions required, following the principle of least privilege while still enabling the web interface to function fully.  
+
+* * *
+
+## 26 GOING DARK NGINX SSL SETUP
+
+Before we build the web control interface, we first need to configure *NGINX* and create a second SSL certificate for a new local website called *going.dark*. This process is very similar to what we did in [16 SSL CERTIFICATE](#16-ssl-certificate) and [17 SETUP NGINX REVERSE PROXY](#17-setup-nginx-reverse-proxy), where we generated a self-signed SSL certificate for *adguard.home* and set up *NGINX* as a reverse proxy.  For this step, we will reuse the existing self-signed certificate authority *term7-CA* to issue a new SSL certificate specifically for *going.dark*.  
 
 #### 1. Generate SSL Certificates for going.dark:
 
@@ -2994,4 +3099,480 @@ To confirm everything is set up correctly, open a web browser on your Mac and go
 
 You should see the simple test page you created earlier.
 
+#### 6. Deploy final NGINX configuration:
+
+At this point we already have *AdGuard Home* running locally on `127.0.0.1:3000`.  
+Our `portal.py` application will later run on `127.0.0.1:5001`, and `config.py` will run on `127.0.0.1:5002`.  
+
+The following command will write the final *NGINX* configuration for *going.dark*.  
+This will overwrite your previous *NGINX* site configuration:  
+
+```
+echo 'server {
+    listen 192.168.77.1:443 ssl http2;
+    server_name going.dark;
+
+    ssl_certificate     /home/admin/tools/CA/SSL/going.dark-fullchain.crt;
+    ssl_certificate_key /home/admin/tools/CA/SSL/going.dark.key;
+
+    # ---- Minimal global hardening ----
+    add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), bluetooth=(), midi=(), usb=()" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Strict-Transport-Security "max-age=15552000" always;  # ~180 days
+
+    # ---- Static site root ----
+    location / {
+        root  /var/www/going.dark;
+        index index.html;
+    }
+
+    # ---- Canonicalize /portal -> /portal/ ----
+    location = /portal { return 301 /portal/; }
+
+    # ---- Serve portal assets as static files ----
+    location = /portal/portal.css {
+        alias /var/www/going.dark/portal/portal.css;
+        default_type text/css;
+        add_header Cache-Control "public, max-age=300";
+    }
+    location = /portal/portal.js {
+        alias /var/www/going.dark/portal/portal.js;
+        default_type application/javascript;
+        add_header Cache-Control "public, max-age=300";
+    }
+
+    # ---- Proxy /portal/ to the Flask app on localhost:5001 ----
+    location /portal/ {
+        proxy_pass http://127.0.0.1:5001/;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # ---- Canonicalize /config -> /config/ ----
+    location = /config { return 301 /config/; }
+
+    # ---- Serve config assets as static files ----
+    location = /config/config.css {
+        alias /var/www/going.dark/config/config.css;
+        default_type text/css;
+        add_header Cache-Control "public, max-age=300";
+    }
+    location = /config/config.js {
+        alias /var/www/going.dark/config/config.js;
+        default_type application/javascript;
+        add_header Cache-Control "public, max-age=60";
+    }
+
+    # ---- Proxy /config/ to the Flask app on localhost:5002 ----
+    location /config/ {
+        proxy_pass http://127.0.0.1:5002/;
+
+        # Standard proxy headers
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 60s;
+    }
+
+    # ---- Canonicalize /adguard -> /adguard/ ----
+    location = /adguard { return 301 /adguard/; }
+
+    # ---- Same-origin path mount of AdGuard Home UI under /adguard/ ----
+    location ^~ /adguard/ {
+        # Strip the /adguard/ prefix before proxying upstream
+        proxy_pass http://127.0.0.1:3000/;
+
+        # Headers
+        proxy_set_header Host              adguard.home;   # upstream expects this
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support (live updates/logs)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout  300s;
+        proxy_send_timeout  300s;
+
+        # Cookie & path scoping so sessions are first-party to going.dark under /adguard/
+        proxy_cookie_domain adguard.home going.dark;
+        proxy_cookie_path   /           /adguard/;
+
+        # ---- Rewrite upstream redirects (Location headers) to stay under /adguard/ ----
+        proxy_redirect ~^(/.*)$ /adguard$1;
+        proxy_redirect http://127.0.0.1:3000/  /adguard/;
+        proxy_redirect https://127.0.0.1:3000/ /adguard/;
+        proxy_redirect https://adguard.home/   /adguard/;
+
+        # ---- Rewrite in-body root-relative URLs (HTML/CSS/JS/JSON) ----
+        proxy_set_header Accept-Encoding "";   # allow sub_filter to see text (disable upstream compression)
+        sub_filter_once off;
+        sub_filter_types text/html text/css application/javascript application/json;
+
+        sub_filter 'href="/'               'href="/adguard/';
+        sub_filter 'src="/'                'src="/adguard/';
+        sub_filter 'action="/'             'action="/adguard/';
+        sub_filter 'content="/'            'content="/adguard/';
+        sub_filter 'url(/'                 'url(/adguard/';
+        sub_filter 'fetch("/'              'fetch("/adguard/';
+        sub_filter "fetch('/"              "fetch('/adguard/";
+        sub_filter 'XMLHttpRequest("/'     'XMLHttpRequest("/adguard/';
+        sub_filter "XMLHttpRequest('/"     "XMLHttpRequest('/adguard/";
+
+        # Avoid caching admin UI/API
+        add_header Cache-Control "no-store" always;
+
+        # ---- Silence ad-tech header ----
+        proxy_hide_header Permissions-Policy;
+        proxy_hide_header Origin-Trial;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), bluetooth=(), midi=(), usb=()" always;
+    }
+}
+
+# HTTP -> HTTPS redirect for going.dark
+server {
+    listen 192.168.77.1:80;
+    server_name going.dark;
+    return 301 https://$host$request_uri;
+}' | sudo tee /etc/nginx/sites-available/nginx-goingdark > /dev/null
+```
+
+At this stage, the static web page and Flask applications (`portal.py` and `config.py`) are not yet installed or running.  
+Because of this, restarting *NGINX* now would cause it to fail when trying to proxy requests to these services.  
+
+**Do not restart NGINX yet.** Continue with the setup of the Flask applications first, and only then reload or restart *NGINX*.  
+
 * * *
+
+## 27 CREATE FLASK APPS
+
+While still logged into your *admin* account, install the required system packages:
+```
+sudo apt install -y python3-flask python3-venv python3-pip
+```
+
+#### 1. About portal.py
+
+The `portal.py` Flask app provides a web interface that runs on `127.0.0.1:5001` and is accessible via `https://going.dark/portal`. The HTML templates are built directly into the app, while the supporting CSS (`portal.css`) and JavaScript (`portal.js`) files will be served from `/var/www/going.dark/portal`.  
+
+Through this interface you will be able to connect and disconnect Wi-Fi networks, start and stop a hotspot (with a new SSID and password set directly from the interface), generate a QR code for mobile clients to easily join the hotspot, connect to your WireGuard VPN, and route all traffic through a Tor Transparent Proxy. The app also displays your current IP address and its geolocation based on that IP.  
+
+This app integrates with the following components from **Part 1**:  
+
+- [11 SETUP WIRELESS HOTSPOT](#11-setup-wireless-hotspot)
+- [18 FIREWALL](#18-firewall)
+- [21 WIREGUARD VPN](#21-wireguard-vpn)
+- [22 TOR TRANSPARENT PROXY](#22-tor-transparent-proxy)
+
+Since our flask apps will run in our standard user account, we need to leave our admin account:
+```
+exit
+```
+
+#### 2. Prepare folder location
+
+As *term7*, create and enter the application directory:  
+
+```
+mkdir -p ~/portal && cd ~/portal
+```
+
+#### 3. Set up Python dependencies in a virtual environment
+
+Create a virtual environment for the Flask app:
+```
+python3 -m venv .venv
+```
+
+Activate the virtual environment:
+```
+. .venv/bin/activate
+```
+
+Install and pin the required Python libraries:  
+```
+pip install --upgrade pip
+```
+```
+pip install gunicorn flask segno
+```
+```
+pip freeze > requirements.txt
+```
+
+Deactivate the virtual environment:
+```
+deactivate
+```
+
+#### 4. Download portal.py
+
+Download the Flask application script into the app folder:
+```
+curl -L -o /home/term7/portal/portal.py "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Flask%20Apps/portal_app/portal.py"
+```
+
+#### 5. Download portal.css and portal.js
+
+Re-enter your *admin* account:
+```
+su admin
+```
+
+Create the web root for the portal assets:
+```
+sudo mkdir -p /var/www/going.dark/portal
+```
+
+Download the frontend files:
+```
+sudo curl -L -o /var/www/going.dark/portal/portal.js "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/portal/portal.js"
+sudo curl -L -o /var/www/going.dark/portal/portal.css "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/portal/portal.css"
+```
+
+#### 6. Create a systemd service for `portal.py`
+
+Create the service unit file: 
+
+```
+sudo tee /etc/systemd/system/portal.service >/dev/null <<'EOF'
+[Unit]
+Description=Portal App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=term7
+Group=term7
+WorkingDirectory=/home/term7/portal
+Environment="PYTHONUNBUFFERED=1"
+Environment="PATH=/home/term7/portal/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+ExecStart=/home/term7/portal/.venv/bin/python -m gunicorn -w 2 -k gthread --threads 8 --bind 127.0.0.1:5001 --access-logfile - --error-logfile - portal:app
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Reload systemd, then enable and start the service:  
+
+```
+sudo systemctl daemon-reload
+```
+```
+sudo systemctl enable --now portal.service
+```
+
+#### 7. About config.py
+
+The `config.py` Flask app provides a web interface that runs on `127.0.0.1:5002` and is accessible via `https://going.dark/config`. Like `portal.py`, the HTML templates are built directly into the app, while the supporting CSS (`config.css`) and JavaScript (`config.js`) files will be served from `/var/www/going.dark/config`.  
+
+Through this interface you can shut down and reboot your Raspberry Pi. On reboot, the app automatically generates a new random device identity by issuing both a new hostname and a new MAC address. In addition, it features a system clock, displays your current NTP server (the peer last used for time synchronization), and in an MOTD-style panel shows system diagnostics including current load, number of running processes, CPU temperature, memory usage, swap usage, and uptime. The app also integrates directly with the website interface we will set up in the next chapter: when your device is offline, most elements fade out, and they fade back in once the device is online again.  
+
+This app integrates with the following components from **Part 1**:  
+
+- [08 RANDOM MAC ADDRESS](#08-random-mac-address)
+- [09 RANDOM HOSTNAME](#09-random-hostname)
+- [12 SETUP NTP](#12-setup-ntp)
+
+Since our Flask apps will run in the standard user account, leave the admin session again:  
+```
+exit
+```
+
+#### 8. Prepare folder location
+
+As *term7*, create and enter the application directory:
+
+```
+mkdir -p ~/config && cd ~/config
+```
+
+#### 9. Set up Python dependencies in a virtual environment
+
+Create a virtual environment for the Flask app:
+```
+python3 -m venv .venv
+```
+
+Activate the virtual environment:
+```
+. .venv/bin/activate
+```
+
+Install and pin the required Python libraries:  
+```
+pip install --upgrade pip
+```
+```
+pip install gunicorn flask
+```
+```
+pip freeze > requirements.txt
+```
+
+Deactivate the virtual environment:
+```
+deactivate
+```
+
+#### 10. Download config.py
+
+Download the Flask application script into the app folder:
+```
+curl -L -o /home/term7/config/config.py "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Flask%20Apps/config_app/config.py"
+```
+
+#### 5. Download portal.css and portal.js
+
+Re-enter your *admin* account:
+```
+su admin
+```
+
+Create the web root for the config assets:
+```
+sudo mkdir -p /var/www/going.dark/config
+```
+
+Download the frontend files:
+```
+sudo curl -L -o /var/www/going.dark/config/config.js "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/config/config.js"
+sudo curl -L -o /var/www/going.dark/config/config.css "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/config/config.css"
+```
+
+#### 6. Create a systemd service for `config.py`
+
+Create the service unit file: 
+
+```
+sudo tee /etc/systemd/system/config.service >/dev/null <<'EOF'
+[Unit]
+Description=Config App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=term7
+Group=term7
+WorkingDirectory=/home/term7/config
+Environment="PYTHONUNBUFFERED=1"
+Environment="PATH=/home/term7/config/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+ExecStart=/home/term7/config/.venv/bin/python -m gunicorn -w 2 -k gthread --threads 8 --bind 127.0.0.1:5002 --access-logfile - --error-logfile - config:app
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Reload systemd, then enable and start the service:  
+
+```
+sudo systemctl daemon-reload
+```
+```
+sudo systemctl enable --now config.service
+```
+
+**Do not restart NGINX yet.** Continue with the setup of the frontend website, and only then reload or restart *NGINX*.  
+
+
+* * *
+
+## 28 DOWNLOAD WEB CONTROL INTERFACE
+
+Once deployed, the frontend website will be available at `https://going.dark`. The layout is intentionally simple: the page contains three drawers you can open and close, each embedding an iframe: Drawer 1 hosts the *Portal.app*, Drawer 2 opens the *Config.app*, and Drawer 3 loads *AdGuard Home*.  
+
+The animated background shows multiplying balls, echoing the privacy model behind Tor: a single user stands out, but as more users appear and traffic looks increasingly uniform, it becomes harder for an observer to determine *who is who*. The core idea is the erosion of certainty about an *original identity* as the crowd grows.
+
+#### 1. Structure
+
+Each file includes comments describing what its sections do:
+
+**Main page**  
+`/var/www/going.dark/index.html`  
+`/var/www/going.dark/style.css`
+
+**Flask app assets**  
+`/var/www/going.dark/portal/portal.js`  
+`/var/www/going.dark/portal/portal.css`  
+`/var/www/going.dark/config/config.js`  
+`/var/www/going.dark/config/config.css`
+
+**JavaScript helpers**  
+`/var/www/going.dark/assets/js/adguard.js`  
+`/var/www/going.dark/assets/js/canvas.js`  
+`/var/www/going.dark/assets/js/drawers.js`  
+`/var/www/going.dark/assets/js/power.js`
+
+**Assets**  
+`/var/www/going.dark/assets/fonts/*`  
+`/var/www/going.dark/assets/favicon.png`  
+`/var/www/going.dark/assets/term7.svg`
+
+#### 2. Download all files
+
+Create the required directories:
+
+```
+sudo mkdir -p /var/www/going.dark/assets/{js,fonts}
+```
+
+Download the HTML, CSS, and JavaScript files:
+
+```
+sudo curl -fL -o /var/www/going.dark/index.html "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/index.html"
+sudo curl -fL -o /var/www/going.dark/style.css "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/style.css"
+sudo curl -fL -o /var/www/going.dark/assets/js/adguard.js "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/js/adguard.js"
+sudo curl -fL -o /var/www/going.dark/assets/js/canvas.js "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/js/canvas.js"
+sudo curl -fL -o /var/www/going.dark/assets/js/drawers.js "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/js/drawers.js"
+sudo curl -fL -o /var/www/going.dark/assets/js/power.js "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/js/power.js"
+```
+
+Download all fonts and icons:
+
+```
+sudo curl -fL -o /var/www/going.dark/assets/favicon.png "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/favicon.png"
+sudo curl -fL -o /var/www/going.dark/assets/term7.svg "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/term7.svg"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/ANON-DIGITAL_italic.ttf "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/ANON-DIGITAL_italic.ttf"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/ANON-DIGITAL_italic.woff "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/ANON-DIGITAL_italic.woff"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/ANON-DIGITAL_italic.woff2 "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/ANON-DIGITAL_italic.woff2"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/ANON-DIGITAL_normal.ttf "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/ANON-DIGITAL_normal.ttf"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/ANON-DIGITAL_normal.woff "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/ANON-DIGITAL_normal.woff"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/ANON-DIGITAL_normal.woff2 "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/ANON-DIGITAL_normal.woff2"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/Handwriting.ttf "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/Handwriting.ttf"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/Handwriting.woff "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/Handwriting.woff"
+sudo curl -fL -o /var/www/going.dark/assets/fonts/Handwriting.woff2 "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/fonts/Handwriting.woff2"
+```
+
+#### 3. Ownership and Permissions
+
+Since the files were downloaded as `root`, they are owned by `root` by default. To ensure consistent ownership across the entire web root, adjust the permissions as follows:  
+
+```
+sudo chown -R www-data:www-data /var/www/going.dark
+```
+
+#### 4. Restart *NGINX*
+
+Finally, restart *NGINX* so the changes take effect: 
+```
+sudo nginx -t
+sudo systemctl restart nginx
+```
+

@@ -1,5 +1,5 @@
 server {
-    listen 443 ssl http2;
+    listen 192.168.77.1:443 ssl http2;
 
     server_name adguard.home;
 
@@ -30,7 +30,7 @@ server {
 }
 
 server {
-    listen 80;
+    listen 192.168.77.1:80;
     server_name adguard.home;
 
     # Redirect HTTP to HTTPS

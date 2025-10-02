@@ -1,0 +1,500 @@
+/* =========================================
+   0) File Overview — style.css for https://going.dark
+   =========================================
+
+What this stylesheet does (visual behavior):
+
+- Establishes the dark theme root variables and font faces (including ANON-DIGITAL and GD-Handwrite).
+- Lays out the full-viewport animated background:
+    • #bg-fade — a brightness wash that canvas.js modulates
+    • #balls   — the drifting balls animation drawn by canvas.js
+- Renders a compact HUD at the top-left with live counters (#ball-counter).
+- Implements a stacked “drawers” UI that slides in from the right, with a top-right toggle control
+  (///// <-> \\\\\) that flips and locks during animations.
+- Hosts three panels:
+    1) Portal (/portal/) — “Network Control Interface”
+    2) /config/ — “Device Configuration”
+    3) /adguard/ — AdGuard Home plus diagnostics cards and a handwriting overlay
+- Shows a spinning logo widget and a minimal footer.
+
+How it’s wired (JS interaction map):
+
+- canvas.js
+    • Reads/sets #bg-fade opacity and draws into #balls.
+    • Updates HUD spans: #ids, #anons, #next, #status.
+- drawers.js
+    • Computes responsive widths for .drawer/.panel based on #ids anchor.
+    • Manages open/close depth, offscreen state, and clipping.
+    • Controls #drawer-toggle glyph lock & hover behavior.
+    • Adds/removes body.adg-over-footer when AdGuard drawer is open.
+- adguard.js
+    • Shows/hides #adg-cover during iframe route changes.
+    • Injects dark CSS into #adguard-frame.
+    • Arms fades and toggles .fade-ready/.hidden on #rd-card, #rd-card-top, and #handwrite-wrap.
+- power.js
+    • Toggles body.power-dim (global dim + click shield) based on /config/health.
+    • Refreshes the #config iframe when backend is healthy.
+
+Section map (in this file):
+
+1) Fonts & Root Variables
+2) Base / Elements
+3) Layout Wrappers
+4) Background Helpers (canvas + fade layer)  [JS: canvas.js]
+5) Ball Counter UI                             [JS: canvas.js]
+6) Drawers System                              [JS: drawers.js]
+7) Toggle Control (///// <-> \\\\\)            [JS: drawers.js]
+8) AdGuard Panel (+ diagnostics & handwriting) [JS: adguard.js]
+9) Logo Widget                                 [JS: drawers.js, power.js]
+10) Power fade + click protection               [JS: power.js]
+*/
+
+
+/* =========================================
+   1) Fonts & Root Variables
+   ========================================= */
+@font-face {
+  font-family: "ANON-DIGITAL";
+  src: url("/assets/fonts/ANON-DIGITAL_normal.woff2") format("woff2"),
+       url("/assets/fonts/ANON-DIGITAL_normal.woff")  format("woff"),
+       url("/assets/fonts/ANON-DIGITAL_normal.ttf")   format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ANON-DIGITAL";
+  src: url("/assets/fonts/ANON-DIGITAL_italic.woff2") format("woff2"),
+       url("/assets/fonts/ANON-DIGITAL_italic.woff")  format("woff"),
+       url("/assets/fonts/ANON-DIGITAL_italic.ttf")   format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GD-Handwrite";
+  src:
+    url("/assets/fonts/Handwriting.woff2") format("woff2"),
+    url("/assets/fonts/Handwriting.woff")  format("woff"),
+    url("/assets/fonts/Handwriting.ttf")   format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root{
+  color-scheme: dark;
+  --tab-w: 36px;
+  --gap-w: 90px;
+  --fallback-panel-w: 1100px;
+  --panel-w: var(--fallback-panel-w);
+  --adg-dark: #0e0e10;
+  --drawer-count: 3;
+
+  /* Logo animation tuning */
+  --logo-size: 130px;
+  --spin-duration: 7s;
+
+  /* Fade timings for power state */
+  --fade-duration: 550ms;
+  --fade-ease: cubic-bezier(.22,.61,.36,1);
+}
+
+/* =========================================
+   2) Base / Elements
+   ========================================= */
+html, body { height: 100%; min-height: 100%; }
+html { background: #2A2A2A; }
+
+body {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+a { color: #4ade80; text-decoration: underline; cursor: pointer; transition: color 0.2s ease; }
+a:hover { color: #22c55e; }
+
+/* =========================================
+   3) Layout Wrappers
+   ========================================= */
+header, main, footer { opacity: 1; position: relative; z-index: 1; }
+header { text-align: center; padding: 2rem 1rem; display: none }
+main { position: relative; padding: 0 1rem 3rem; }
+
+footer {
+  position: fixed; bottom: -5px; z-index: 9999;
+  width: 100%; text-align: center; font-size: 14px; letter-spacing: 0.5px;
+  padding: 2rem 1rem; color: #ff0000; mix-blend-mode: difference;
+  background: none !important; background-color: transparent !important;
+  pointer-events: auto;
+}
+body.adg-over-footer footer { z-index: 0; }
+footer::before, footer::after { content: none !important; background: transparent !important; }
+footer a { color: inherit; text-decoration: none; cursor: pointer; }
+footer a:hover { opacity: 0.8; }
+
+/* =========================================
+   4) Background Helpers
+   - JS INTERACTION (canvas.js §4/§10/§14):
+     • #bg-fade opacity is driven by the background wave (fade layer).
+     • #balls is sized and drawn to by canvas.js at ~30 FPS.
+   ========================================= */
+#bg-fade {
+  position: fixed;
+  inset: 0;
+  background: #FFF4C7;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+}
+
+#balls {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  display: block;
+  background: transparent;
+  pointer-events: none;
+}
+
+/* =========================================
+   5) Ball Counter UI
+   - JS INTERACTION (canvas.js §7/§11/§13/§14):
+     • #ids, #anons, #next, #status textContent updated live.
+     • Spinner frames shown in #ids during low-visibility phases.
+   ========================================= */
+#ball-counter {
+  position: fixed; top: 3px; left: 12px; z-index: 2; font-size: 14px; letter-spacing: 0.5px;
+  color: #ff0000; mix-blend-mode: difference; user-select: none; pointer-events: none;
+  display: grid; grid-template-columns: auto 80px auto; row-gap: 7px; column-gap: 20px; align-items: baseline; white-space: nowrap;
+}
+#ball-counter .label { grid-column: 1; justify-self: start; }
+#ball-counter .value { grid-column: 2; justify-self: end; text-align: right; }
+#ball-counter .r1 { grid-row: 1; } .r2 { grid-row: 2; } .r3 { grid-row: 3; }
+#ball-counter .row1 { padding-top: 10px; }
+#ball-counter .status { grid-column: 3; grid-row: 1; justify-self: start; white-space: pre; align-self: baseline; opacity: 0.95; margin-left: 6ch; }
+
+/* =========================================
+   6) Drawers System
+   - JS INTERACTION (drawers.js §4/§5/§7/§8):
+     • Computes --panel-w at runtime and applies clip-path occlusion.
+     • Toggles .open/.offscreen and aria-expanded on panels.
+     • Adds body.adg-over-footer when depth >= 2 (AdGuard drawer visible).
+   ========================================= */
+.drawer{
+  position: fixed; top: 0;
+  width: calc(var(--tab-w) + var(--panel-w));
+  height: 100vh;
+  display: grid; grid-template-columns: var(--tab-w) var(--panel-w);
+  transform: translateX(var(--panel-w));
+  transition: transform 360ms ease-in-out;
+  pointer-events: auto;
+}
+.drawer.open { transform: translateX(0) }
+
+.tab {
+  grid-column: 1; position: relative; z-index: 3; width: var(--tab-w); height: 100%;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none;
+}
+.tab .label {
+  writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg);
+  font-family: "ANON-DIGITAL", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-style: italic;
+  letter-spacing: 1.8px; opacity: .95; font-size: 23px;
+  text-align: center; padding: 6px 0; white-space: nowrap;
+}
+.tab-wifi { background: #ff0000; color: #FFFFFF; }
+.tab-config { background: #9D9800; color: #FFFFFF; }
+.tab-adg  { background: #6B006C; color: #FFFFFF; }
+
+.panel{
+  grid-column: 2;
+  height: 100%;
+  background: transparent;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: auto;
+  z-index: 1;
+}
+.panel iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.panel-header {
+  display:flex;
+  align-items: baseline;
+  gap:.75rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.drawer.offscreen {
+  transform: translateX(calc(var(--panel-w) + var(--tab-w) + 60vw));
+}
+
+/* =========================================
+   7) Toggle Control (///// <-> \\\\\)
+   - JS INTERACTION (drawers.js §6/§7):
+     • #drawer-toggle[data-locked] flips between slashes/backslashes.
+     • [data-animating="1"] disables hover flip during transitions.
+     • .at-right positions the toggle when drawers are hidden.
+   ========================================= */
+#drawer-toggle{
+  position: fixed;
+  top: 13px;
+  right: calc(var(--drawer-count) * var(--tab-w));
+  transform: translateX(calc(-100% + 34px));
+  z-index: 20000;
+  display: inline-block;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  color: #ff0000;
+  mix-blend-mode: difference;
+  cursor: pointer;
+  user-select: none;
+  transition: right 360ms ease-in-out,
+              transform 360ms ease-in-out,
+              color 200ms ease,
+              opacity 200ms ease;
+}
+#drawer-toggle.at-right{ right: 17px; transform: none; }
+#drawer-toggle:hover{ color: #22c55e; opacity: 0.8; }
+#drawer-toggle[data-animating="1"]:hover { color: #ff0000; opacity: 1; }
+body:not(.power-dim) #drawer-toggle[data-animating="1"] { opacity: 1; }
+#drawer-toggle .toggle-hit{ position: relative; display: inline-block; padding: 4px 6px; line-height: 1; }
+#drawer-toggle .tri{ position: relative; display: block; perspective: 800px; width: 5ch; height: 1em; }
+#drawer-toggle .tri .face{
+  position: absolute; inset: 0; display: inline-block; backface-visibility: hidden;
+  font-weight: 900; -webkit-text-stroke: 0.6px currentColor; transform-style: preserve-3d;
+  transition: transform 280ms ease-in-out;
+  letter-spacing: inherit;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#drawer-toggle[data-locked="back"]  .tri .front{ transform: rotateY(360deg); }
+#drawer-toggle[data-locked="back"]  .tri .back { transform: rotateY(180deg); }
+#drawer-toggle[data-locked="front"] .tri .front{ transform: rotateY(180deg); }
+#drawer-toggle[data-locked="front"] .tri .back { transform: rotateY(360deg); }
+#drawer-toggle[data-animating="0"][data-locked="back"]  .toggle-hit:hover .tri .front{ transform: rotateY(180deg); }
+#drawer-toggle[data-animating="0"][data-locked="back"]  .toggle-hit:hover .tri .back { transform: rotateY(360deg); }
+#drawer-toggle[data-animating="0"][data-locked="front"] .toggle-hit:hover .tri .front{ transform: rotateY(360deg); }
+#drawer-toggle[data-animating="0"][data-locked="front"] .toggle-hit:hover .tri .back { transform: rotateY(180deg); }
+
+/* =========================================
+   8) AdGuard Panel
+   - JS INTERACTION (adguard.js §2–§9):
+     • #adg-cover fades during iframe loads/navigations.
+     • .rd-card(.fade-ready/.hidden) + #handwrite-wrap fade based on login state.
+     • body.adg-over-footer ensures panel z-index above footer while open.
+   ========================================= */
+#panel-adguard { 
+  padding: 0; 
+  overflow: hidden; 
+}
+
+#adguard-home {
+  position: relative; 
+  height: 100%; 
+  width: 100%; 
+  margin: 0; 
+  padding: 0; 
+  z-index: 6; 
+  background: var(--adg-dark);
+  overflow: hidden;
+  overscroll-behavior: none;
+  scrollbar-width: none;
+}
+#adguard-home::-webkit-scrollbar { width: 0; height: 0; }
+#adguard-home::-webkit-scrollbar-thumb { background: transparent; }
+#adguard-home::-webkit-scrollbar-track { background: transparent; }
+
+#adg-cover {
+  position: absolute; 
+  inset: 0;
+  background: var(--adg-dark);
+  z-index: 10;
+  opacity: 1;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+
+body.adg-over-footer #adguard-home { z-index: 10000; }
+
+#adguard-home iframe#adguard-frame {
+  position: absolute; 
+  inset: 0; 
+  width: 100%; 
+  height: 100%; 
+  border: 0; 
+  display: block; 
+  margin: 0; 
+  padding: 0; 
+  background: var(--adg-dark);
+}
+
+/* Handwriting Overlay */
+/* JS INTERACTION (adguard.js §5/§7):
+   - Adds .fade-ready once armed; toggles .hidden on state changes.
+   - power.js also forces opacity:0 via body.power-dim. */
+#adguard-home #handwrite-wrap {
+  position: absolute;
+  left: 85%;
+  top: 55%;
+  width: min(1100px, 92%);
+  height: auto;
+  transform: translate(-50%, -50%) rotate(77deg);
+  z-index: 10001;
+  pointer-events: none;
+  opacity: .95;
+  mix-blend-mode: normal;
+  transition: none; /* disabled by default */
+}
+#adguard-home #rd-card.fade-ready ~ #handwrite-wrap {
+  transition: opacity var(--fade-duration) var(--fade-ease); /* enabled once armed */
+}
+#adguard-home #handwrite { width: 100%; height: auto; display: block; }
+#adguard-home #handwrite text {
+  font-family: "GD-Handwrite", "Comic Sans MS", "Bradley Hand", cursive;
+  font-size: 53px;
+  letter-spacing: 0.6px;
+  fill: #ff0000;
+  dominant-baseline: hanging;
+}
+body.power-dim #adguard-home #handwrite-wrap { opacity: 0; }
+
+/* Remote Diagnostics Cards (shared) */
+#adguard-home .rd-card {
+  position: absolute;
+  left: 1rem;
+  z-index: 10002;
+  display: inline-block;
+  padding: 12px 16px;
+  color: #ff0000;
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 1;                /* default: visible */
+  transition: none;          /* disabled by default */
+}
+
+/* Positioning */
+#adguard-home #rd-card-top   { top: 2rem;  }   /* top card (margin ~2rem) */
+#adguard-home #rd-card       { bottom: 9rem; } /* bottom card (existing position) */
+
+/* Enable fades once armed (no delayed visibility) */
+#adguard-home .rd-card.fade-ready {
+  transition: opacity var(--fade-duration) var(--fade-ease);
+}
+
+/* Hidden state: fade via opacity, keep non-interactive during fade */
+#adguard-home #rd-card.hidden,
+#adguard-home #rd-card-top.hidden,
+#adguard-home #handwrite-wrap.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Make visibility explicit but immediate (no transition) */
+#adguard-home #rd-card,
+#adguard-home #rd-card-top { visibility: visible; }
+#adguard-home #rd-card.hidden,
+#adguard-home #rd-card-top.hidden { visibility: hidden; }
+
+#adguard-home .rd-title {
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+#adguard-home .rd-list {
+  list-style: none;
+  margin: 0 0 3rem 0; /* top 0, right 0, bottom 3rem, left 0 */
+  padding: 0;
+}
+#adguard-home .rd-list:last-of-type {
+  margin-bottom: 0;
+}
+#adguard-home .rd-list li { margin: 6px 0 0 0; }
+
+#adguard-home .rd-link {
+  font-weight: 700;
+  color: #ff0000;
+  text-decoration: underline;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+#adguard-home .rd-link:hover { color: #22c55e; }
+
+/* Keep click-shield during power-dim but don't force card opacity */
+body.power-dim #adguard-home #rd-card,
+body.power-dim #adguard-home #rd-card-top {
+  pointer-events: none !important;
+}
+
+/* =========================================
+   9) Logo Widget
+   - JS INTERACTION:
+     • drawers.js fades #gd-logo-wrap during show/hide sequences (.logo-fade).
+     • power.js may globally fade via body.power-dim.
+   ========================================= */
+#gd-logo-wrap{
+  position: fixed;
+  left: -8px;
+  top: 125px;
+  width: var(--logo-size);
+  height: var(--logo-size);
+  z-index: 10001;
+  perspective: 900px;
+  pointer-events: auto;
+  mix-blend-mode: difference;
+  transition: opacity var(--fade-duration) var(--fade-ease);
+  will-change: opacity;
+}
+#gd-logo-wrap.logo-fade { opacity: 0; }
+#gd-logo-3d{
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform-origin: 50% 50%;
+  animation: gd-spinY var(--spin-duration) linear infinite;
+}
+.gd-face{ position: absolute; inset: 0; width: 100%; height: 100%; backface-visibility: hidden; mix-blend-mode: difference; pointer-events: none; }
+.gd-front{ transform: rotateY(0deg); }
+.gd-back{  transform: rotateY(180deg); }
+@keyframes gd-spinY{ from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+
+/* =========================================
+   10) Power fade + click protection
+   - JS INTERACTION (power.js §3/§7/§10):
+     • Toggles body.power-dim on health misses and clears when OK.
+     • Applies global opacity + pointer-events:none to shield the UI.
+   ========================================= */
+#gd-logo-wrap,
+footer,
+#ball-counter { transition: opacity var(--fade-duration) var(--fade-ease); }
+.drawer { transition: transform 360ms ease-in-out, opacity var(--fade-duration) var(--fade-ease); }
+#drawer-toggle { transition: right 360ms ease-in-out, transform 360ms ease-in-out, color 200ms ease, opacity var(--fade-duration) var(--fade-ease); }
+body.power-dim { cursor: default !important; }
+body.power-dim #drawer-toggle,
+body.power-dim .drawer,
+body.power-dim #gd-logo-wrap,
+body.power-dim footer,
+body.power-dim #ball-counter,
+body.power-dim iframe {
+  opacity: 0;
+  pointer-events: none !important;
+}

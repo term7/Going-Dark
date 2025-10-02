@@ -1,0 +1,213 @@
+<!doctype html>
+<!--
+index.html — Markup skeleton for https://going.dark
+
+What it does (What you’ll see):
+
+- A full-viewport animated backdrop (canvas + a brightness “fade” overlay).
+- A minimal HUD (“Target Count”, “Proliferation Events”, and a countdown).
+- A tri-state top-right toggle that slides stacked “drawers” on/off screen.
+- Three drawers:
+    1) Network Control Interface (Portal)
+    2) Device Configuration
+    3) AdGuard Home + diagnostics cards + a handwriting overlay
+- A spinning logo widget and a compact footer link.
+
+How it’s wired (Technical overview):
+
+- Visual layers are ordered back-to-front: bg-fade → canvas → HUD → drawers → logo → footer.
+- JS modules are self-contained and attach by IDs/classes declared here:
+    • canvas.js   → #bg-fade, #balls, #ids, #anons, #next, #status
+    • drawers.js  → .drawer, .tab, .panel, #drawer-toggle, #gd-logo-wrap, #ids
+    • adguard.js  → #adguard-frame, #adg-cover, #rd-card, #rd-card-top, #handwrite-wrap
+    • power.js    → #config (iframe), toggles body.power-dim
+- All external apps are sandboxed in iframes; CSS ensures dark UI and hides scrollbars.
+
+Section map:
+
+1) Head (meta, favicon, CSS)
+2) Background Layer (fade panel + animation canvas)
+3) HUD / Ball Counter
+4) Toggle Control (///// <-> \\\\\)
+5) Drawers (Portal / Config / AdGuard)
+6) Logo Widget
+7) Footer
+8) Scripts (canvas, drawers, adguard, power)
+
+Note: Do not remove or reorder existing lines; this file adds structure and commentary only.
+-->
+<html lang="en">
+<head>
+  <!-- =========================
+       1) Head (meta / assets)
+       ========================= -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Going Dark</title>
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- =========================================
+       2) Background Layer (fade + canvas)
+       - canvas.js controls opacity of #bg-fade and draws into #balls.
+       - Layer order matters: these are fixed and non-interactive.
+       ========================================= -->
+  <div id="bg-fade" aria-hidden="true"></div>
+  <canvas id="balls" aria-hidden="true"></canvas>
+
+  <!-- =========================================
+       3) HUD / Ball Counter
+       - Live counters updated by canvas.js:
+         • #ids   — current ball count (or spinner during low-visibility)
+         • #anons — proliferation events total
+         • #next  — countdown to next color-match
+         • #status— “Target Confidence” or blank during spinner
+       ========================================= -->
+  <div id="ball-counter">
+    <span class="label row1 r1">Target Count:</span><span class="value row1 r1" id="ids">1</span>
+    <span class="label r2">Proliferation Events:</span><span class="value r2" id="anons">0</span>
+    <span class="label r3" id="gd-line">Going Dark:</span><span class="value r3" id="next">00:00</span>
+    <span class="status row1" id="status"></span>
+  </div>
+
+  <!-- =========================================
+       4) Toggle Control (///// <-> \\\\\)
+       - drawers.js locks/animates the glyph during open/close sequences.
+       - data-locked/data-animating are state hints for CSS transitions.
+       ========================================= -->
+
+  <!-- Toggle ///// <-> \\\\\-->
+  <div id="drawer-toggle" aria-label="Toggle drawers" role="button" title="Show drawers" data-locked="front" data-animating="0" class="at-right">
+    <span class="toggle-hit" aria-hidden="true">
+      <span class="tri">
+        <span class="face front">/////</span>
+        <span class="face back">&bsol;&bsol;&bsol;&bsol;&bsol;</span>
+      </span>
+    </span>
+  </div>
+
+  <!-- =========================================
+       5) Drawers (stacked L→R with tabs)
+       - Each <section.drawer> has:
+         • .tab    — vertical label; click to open/close depth
+         • .panel  — content area (iframe or local markup)
+       - drawers.js computes widths/clipping and manages offscreen state.
+       ========================================= -->
+
+  <!-- Drawer 0: Network Control Interface (Portal) -->
+  <!-- Drawers (start OFFSCREEN) -->
+  <section class="drawer offscreen" data-index="0">
+    <div class="tab tab-wifi" data-key="0" aria-controls="panel-wifi" title="Network Control Interface">
+      <span class="label">NETWORK CONTROL INTERFACE</span>
+    </div>
+    <div class="panel" id="panel-wifi" aria-expanded="false">
+      <iframe id="portal" src="/portal/" title="Portal"></iframe>
+    </div>
+  </section>
+
+  <!-- Drawer 1: Device Configuration (/config iframe) -->
+  <section class="drawer offscreen" data-index="1">
+    <div class="tab tab-config" data-key="1" aria-controls="panel-config" title="Device Information">
+      <span class="label">DEVICE CONFIGURATION</span>
+    </div>
+    <div class="panel" id="panel-config" aria-expanded="false">
+      <iframe id="config" src="/config/" title="Device Configuration" loading="lazy" referrerpolicy="no-referrer"></iframe>
+    </div>
+  </section>
+
+  <!-- Drawer 2: AdGuard Home (+ diagnostics + handwriting overlay) -->
+  <section class="drawer offscreen" data-index="2">
+    <div class="tab tab-adg" data-key="2" aria-controls="panel-adguard" title="AdGuardHome">
+      <span class="label">ADGUARD HOME</span>
+    </div>
+    <div class="panel" id="panel-adguard" aria-expanded="false">
+      <div id="adguard-home">
+        <!-- adguard.js shows a cover during iframe navigations and injects dark CSS -->
+        <div id="adg-cover" aria-hidden="true"></div>
+        <iframe id="adguard-frame" title="AdGuard Home" src="/adguard/" loading="lazy" referrerpolicy="no-referrer"></iframe>
+
+        <!-- Remote Diagnostics Links (SPLIT INTO TWO CARDS)
+             adguard.js toggles .fade-ready/.hidden on these when login state changes. -->
+        <div id="rd-card-top" class="rd-card" role="complementary" aria-labelledby="rd-top-title">
+          <div class="rd-title" id="rd-top-title">Adblock Tests</div>
+          <ul class="rd-list">
+            <li><a class="rd-link" href="https://adblock.turtlecute.org/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://adblock.turtlecute.org/</a></li>
+            <li><a class="rd-link" href="https://canyoublockit.com/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://canyoublockit.com/</a></li>
+          </ul>
+          <div class="rd-title">Fingerprinting Tests</div>
+          <ul class="rd-list">
+            <li><a class="rd-link" href="https://coveryourtracks.eff.org/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://coveryourtracks.eff.org/</a></li>
+            <li><a class="rd-link" href="https://browserleaks.com/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://browserleaks.com/</a></li>
+          </ul>
+        </div>
+
+        <div id="rd-card" class="rd-card" role="complementary" aria-labelledby="rd-bottom-title">
+          <div class="rd-title" id="rd-bottom-title">WebRTC Leaks</div>
+          <ul class="rd-list">
+            <li><a class="rd-link" href="https://browserleaks.com/webrtc" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://browserleaks.com/webrtc</a></li>
+          </ul>
+          <div class="rd-title" id="rd-bottom-title">DNS Diagnostics</div>
+          <ul class="rd-list">
+            <li><a class="rd-link" href="https://browserleaks.com/dns" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://browserleaks.com/dns</a></li>
+            <li><a class="rd-link" href="https://wander.science/projects/dns/dnssec-resolver-test/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://wander.science/projects/dns/dnssec-resolver-test/</a></li>
+          </ul>
+          <div class="rd-title">Tor Check</div>
+          <ul class="rd-list">
+            <li><a class="rd-link" href="https://check.torproject.org/" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">https://check.torproject.org/</a></li>
+          </ul>
+        </div>
+
+
+        <!-- Handwriting overlay (SVG text along curves)
+             • Fades with diagnostics via class toggles from adguard.js
+             • Non-interactive; sits above the iframe -->
+        <!-- Handwriting overlay-->
+        <div id="handwrite-wrap" aria-hidden="true">
+          <svg id="handwrite" viewBox="0 0 1100 260" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Handwritten message">
+            <defs>
+              <path id="curve1" d="M80,100  C380,60   720,60   1020,100" />
+              <path id="curve2" d="M105,140 C405,100  745,100  1045,140" />
+            </defs>
+            <text class="line l1"><textPath href="#curve1">F*ck targeted ads! F*ck targeted price-tags!</textPath></text>
+            <text class="line l2"><textPath href="#curve2">F*ck Surveillance-Capitalism!</textPath></text>
+          </svg>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================
+       6) Logo Widget
+       - drawers.js fades this with the drawer show/hide sequences.
+       - power.js may globally dim it via body.power-dim.
+       ========================================= -->
+  <!-- Rotating logo (start faded) -->
+  <div id="gd-logo-wrap" class="logo-fade">
+    <div id="gd-logo-3d" role="img" aria-label="term7 logo spinning">
+      <img class="gd-face gd-front" src="/assets/term7.svg" alt="" />
+      <img class="gd-face gd-back"  src="/assets/term7.svg" alt="" />
+    </div>
+  </div>
+
+  <!-- =========================================
+       7) Footer
+       - Fixed-position, blend-mode “difference” to stay readable.
+       ========================================= -->
+  <footer>
+    <a href="https://codeberg.org/term7/Going-Dark" target="_blank" rel="noopener">/| source -> code /| :: term7-going-dark</a>
+  </footer>
+
+  <!-- =========================================
+       8) Scripts
+       - Loading order is not interdependent; each module is self-contained.
+       - ‘defer’ ensures DOM is parsed before handlers run.
+       ========================================= -->
+  <script src="/assets/js/canvas.js" defer></script>
+  <script src="/assets/js/drawers.js" defer></script>
+  <script src="/assets/js/adguard.js" defer></script>
+  <script src="/assets/js/power.js" defer></script>
+</body>
+</html>

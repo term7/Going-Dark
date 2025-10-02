@@ -1,0 +1,622 @@
+/* =========================================
+   0) File Overview — portal.css for /portal panel
+   =========================================
+
+What this stylesheet does (visual behavior):
+
+- Styles the two-column Portal UI embedded under /portal/.
+- LEFT column: Wi-Fi scanning/pairing and Hotspot control (with QR join).
+- RIGHT column: WireGuard VPN + Tor Transparent Proxy controls, diagnostics,
+  and conditional notices (Tor active card, Offline looping card).
+- Uses a simple grid for columns; cards stack within each column.
+- Keeps the page scrollable while visually hiding scrollbars.
+
+JS interaction map (who updates what):
+
+- portal.js
+  • (§4) Spinners: injects rotating glyphs into status lines.
+  • (§5/§6/§12) Wi-Fi scan list population, dynamic labels, SSID connect/disconnect.
+  • (§7/§9/§10) IP/UA/Geolocation diagnostics rendered into #ipgeo-status.
+  • (§14) Service toggles (WG/Tor/Hotspot) + Tor/Offline notice visibility/fades.
+  • (§16) Hotspot client counts, (§18) password-eye toggle for hotspot password.
+
+Section map (in this file):
+
+1) Fonts & Root Variables
+2) Base / Elements & Transparency
+3) Layout: Grid & Columns
+4) Typography / Titles
+5) Status & Info Lines
+6) Forms & Rows
+7) Inputs & Selects
+8) Buttons
+9) Hotspot Section — flex wrap layout
+10) Password Visibility Toggle (eye)
+11) Tor Notice Card (fade + colors + links)
+12) Offline Notice Card (loops)
+------------------------------------------------------------------- */
+
+
+/* =========================================
+   1) Fonts & Root Variables
+   ========================================= */
+@font-face {
+  font-family: "ANON-DIGITAL";
+  src: url("/assets/fonts/ANON-DIGITAL_normal.woff2") format("woff2"),
+       url("/assets/fonts/ANON-DIGITAL_normal.woff")  format("woff"),
+       url("/assets/fonts/ANON-DIGITAL_normal.ttf")   format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+
+  --portal-bg: transparent;
+  --portal-fg: #0b0b0b;
+  --portal-red: #ff0000;
+  --portal-green: #22c55e;
+  --portal-green-soft: #86efac;
+
+  /* Cards */
+  --card-bg: rgba(255, 255, 255, 0.1);
+}
+
+/* Global text selection colors */
+::selection {
+  background: #2A2A2A;
+  color: var(--portal-green);
+}
+::-moz-selection {
+  background: #2A2A2A;
+  color: var(--portal-green);
+}
+
+/* Make sure inputs/textarea match, too */
+input::selection,
+textarea::selection {
+  background: #2A2A2A;
+  color: var(--portal-green);
+}
+
+/* =========================================
+   2) Base / Elements & Transparency
+   ========================================= */
+html, body { background: transparent !important; }
+html, body { height: 100%; }
+
+/* Enable scroll BUT hide the scrollbars */
+body {
+  margin: 0;                          /* gutter as padding, not margin */
+  padding: 1.5rem;                    /* same visual spacing as before */
+  box-sizing: border-box;             /* keep padding inside the 100% height */
+  overflow: auto;                     /* allow scrolling when needed */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: var(--portal-bg) !important;
+  color: var(--portal-fg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+
+  /* Hide scrollbars cross-browser while keeping scroll functional */
+  scrollbar-width: none;              /* Firefox */
+  -ms-overflow-style: none;           /* IE/Edge (legacy) */
+}
+body::-webkit-scrollbar { display: none; }  /* Chrome/Safari */
+
+/* Also hide any root scrollbar tracks */
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar { display: none; }
+
+#app, #root, .app, .root { background: transparent !important; }
+
+/* =========================================
+   3) Layout: Grid & Columns
+   ========================================= */
+.portal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;   /* two equal columns */
+  gap: 1rem;
+  align-items: start;
+  margin-top: 1.5rem;
+}
+
+/* Add extra scroll space below the last card */
+.portal-grid::after {
+  content: "";
+  display: block;
+  height: 2.5rem;
+}
+
+.portal-col {
+  display: flex;           /* each column stacks vertically */
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.card {
+  background: var(--card-bg);
+  /* backdrop-filter: saturate(160%) blur(4px); */
+  border: none;
+  border-radius: 0;
+  padding: 1rem 1.25rem;
+  box-shadow: none;
+  min-width: 0;
+}
+
+/* Remove any legacy explicit placements (if present anywhere) */
+#wifi-card, #vpn-card, #hotspot-card, #tor-ascii-card {
+  grid-column: auto !important;
+  grid-row: auto !important;
+}
+
+/* Collapse to single column on medium/small widths */
+@media (max-width: 900px) {
+  .portal-grid { grid-template-columns: 1fr; }
+}
+
+/* Make the hotspot card a size container */
+#hotspot-card { container-type: inline-size; }
+
+/* =========================================
+   4) Typography / Titles
+   ========================================= */
+.portal-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+/* =========================================
+   5) Status & Info Lines
+   ========================================= */
+/* JS INTERACTION: Text content is updated by portal.js
+   - §5 Status Line (scan countdown/labels)
+   - §4 Spinners (injects spinner glyphs)
+   - §7 IP/UA/Geo UI (renders UA)
+   - §10 Geolocation (renders geo result) */
+.portal-status {
+  color: var(--portal-fg);
+  background: transparent;
+  padding: 0.25rem 0 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Ensure button-to-statusline spacing is consistent across panels */
+.portal-btnbar { display: flex; width: 100%; margin: 0; }
+.card .portal-btnbar + .portal-statusline { margin-top: .5rem; }
+
+/* Scan status line — red and small
+   JS INTERACTION: portal.js §5 updates #scan-base/#scan-dynamic and spinners (§4) */
+#scan-status {
+  color: var(--portal-red);
+  user-select: none;
+  pointer-events: none;
+}
+
+.portal-statusline {
+  margin-top: .35rem;
+  font-size: 12px;
+}
+
+/* IP/UA/Geo block — same red and spacing under WG/Tor buttons
+   We turn this into a 1-column grid with 3 rows:
+     Row 1: IP line (auto height)
+     Row 2: UA line (auto height)
+     Row 3: GEO line (FIXED height = reserved buffer)
+   This way, the geolocation text can wrap within a reserved vertical slot
+   without changing the card's overall height.
+   JS INTERACTION: portal.js §7 (layout), §9 (IP detection), §10 (geo), §4 (spinners) */
+#ipgeo-status {
+  color: var(--portal-red);
+  user-select: none;
+  pointer-events: none;
+
+  /* grid layout for predictable height */
+  display: grid;
+  grid-template-columns: 1fr;
+
+  /* baseline metrics for 12px text; 1lh ≈ 1.35em */
+  --geo-line-height: 1.35em;
+  --geo-lines: 2.0;                               /* default reserve ≈ 2 lines */
+  --geo-reserve-height: calc(var(--geo-lines) * var(--geo-line-height));
+
+  /* rows: IP (auto), UA (auto), GEO (fixed reserve) */
+  grid-template-rows: auto auto var(--geo-reserve-height);
+
+  /* replace <br/><br/> with a controlled gap */
+  row-gap: 0.75rem;
+}
+
+/* Hide the <br/> separators that portal.js inserts; grid handles spacing */
+#ipgeo-status br { display: none; }
+
+/* IP and UA lines simply flow in row 1 & 2 */
+#ip-line,
+#ua-line,
+#geo-line {
+  font-size: 12px;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+
+/* GEO line occupies a fixed-height grid row.
+   If the text wraps, it uses up that reserved height instead of growing the card. */
+#geo-line {
+  align-self: start;  /* pin to top of its reserved row */
+  overflow: visible;  /* allow visual overflow if glyphs render slightly taller */
+  /* No margins here; the row gap controls vertical rhythm */
+}
+
+/* Responsive tuning:
+   Narrower layouts wrap more → reserve a bit more
+   Wider layouts wrap less   → reserve a bit less */
+@media (max-width: 900px) {
+  #ipgeo-status { --geo-lines: 2.6; }  /* ~2.6 lines on small screens */
+}
+
+@media (min-width: 1200px) {
+  #ipgeo-status { --geo-lines: 1.6; }  /* ~1.6 lines on wide screens */
+}
+
+/* Hotspot clients line — same style/spacing as "Available:"
+   JS INTERACTION: portal.js §16 polls and updates #hotspot-clients-count */
+#hotspot-clients {
+  color: var(--portal-red);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Note under the IP/Geo block in the VPN card */
+.vpn-note {
+  margin-top: 1rem;
+  color: var(--portal-fg);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* =========================================
+   6) Forms & Rows
+   ========================================= */
+.portal-form { width: 100%; }
+
+/* Overall row spacing */
+.portal-row  { margin: 1rem 0; }
+
+/* General labels / inputs */
+label,
+.portal-select,
+.portal-input {
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.5rem;  /* default */
+  display: block;
+}
+
+/* Hide legacy <br/> after labels so spacing is CSS-controlled */
+.portal-row label + br { display: none !important; }
+
+/* Slightly increase label→input gap (the four fields only) */
+label[for="ssid"],
+label[for="password"],
+label[for="hotspot-ssid"],
+label[for="hotspot-password"] {
+  margin-bottom: 0.4rem !important;
+}
+
+/* ↓ ENFORCE the exact spacing for the Hotspot password → hint block */
+#hotspot-card #hotspot-form .hs-pw-row { margin-bottom: 0 !important; }
+#hotspot-card #hotspot-form .hs-pw-row .portal-input { margin-bottom: 0 !important; }
+#hotspot-card #hotspot-form .hs-pw-row + .qr-hint { margin-top: .5rem !important; } /* match button→clients gap */
+
+/* JS INTERACTION: Password-eye logic wraps/adjusts inputs
+   portal.js §18 adds .pw-wrap, .with-eye, and the .pw-toggle button */
+#hotspot-card .pw-toggle {
+  /* original was: translateY(calc(-50% - 3px)) */
+  transform: translateY(calc(-50%));
+}
+
+/* =========================================
+   7) Inputs & Selects
+   ========================================= */
+.portal-select {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  padding: 0.56rem 3rem 0.56rem 0.9rem;
+  border: 1px solid var(--portal-red);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.3);
+  color: #111;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23000000'><path d='M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08z'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 1.35rem auto;
+  background-position: right 1rem center;
+  background-position-y: calc(50% + 1px);
+  box-sizing: border-box;
+  min-block-size: 0;
+}
+/* JS INTERACTION: options are populated/relabeled by portal.js §6 & §12 */
+.portal-select:hover { border-color: var(--portal-green); }
+.portal-select:focus {
+  border-color: var(--portal-green);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--portal-green-soft);
+}
+.portal-select::-ms-expand { display: none; }
+
+.portal-input[type="password"],
+.portal-input[type="text"] {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+  padding: 0.56rem 0.9rem;
+  border: 1px solid var(--portal-red);
+  border-radius: 5px;
+  margin-top: 0;
+  background: rgba(255, 255, 255, 0.3);
+  color: #111;
+  min-block-size: 0;
+}
+.portal-input[type="password"]:hover,
+.portal-input[type="text"]:hover { border-color: var(--portal-green); }
+.portal-input[type="password"]:focus,
+.portal-input[type="text"]:focus {
+  border-color: var(--portal-green);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--portal-green-soft);
+}
+
+/* =========================================
+   8) Buttons
+   ========================================= */
+/* JS INTERACTION: labels/disabled state toggled by portal.js
+   - §12 Wi-Fi Connect/Disconnect
+   - §14 Service Controls (WG/Tor/Hotspot) */
+.portal-btnrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.portal-btn {
+  appearance: none;
+  background: var(--portal-red);
+  color: white;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.6rem 1rem;
+  font-size: clamp(16px, 1.6vw, 21px);
+  font-family: "ANON-DIGITAL", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-decoration: none;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  box-sizing: border-box;
+  min-inline-size: 12ch;
+  flex: 1 1 auto;
+}
+
+.btn-wifi-pair    { flex-basis: clamp(14ch, 45%, 18ch); }
+.btn-svc-pair     { flex-basis: clamp(18ch, 48%, 26ch); }
+.btn-toggle-fixed { flex-basis: clamp(22ch, 100%, 28ch); }
+
+.portal-btn:hover,
+.portal-btn:focus-visible { background: var(--portal-green); outline: none; }
+.portal-btn:active         { background: var(--portal-green); }
+
+/* =========================================
+   9) Hotspot Section — flex wrap layout
+   ========================================= */
+.hotspot-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  width: 100%;
+  gap: 1rem; /* same spacing between left/right as other cards */
+}
+
+.hotspot-left,
+.hotspot-right {
+  flex: 1 1 18ch;   /* tweak 18ch to adjust collapse point */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;        /* same vertical spacing as button rows in other cards */
+}
+
+/* JS INTERACTION: QR image src updated by portal.js
+   - §14 refreshHotspotQR()
+   - §17 mouseenter/leave/click listeners on #hotspot-qr */
+.qr-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+#hotspot-qr {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: crisp-edges;
+  cursor: pointer;
+
+  border: 1px solid var(--portal-red);
+  border-radius: 5px;
+  box-sizing: border-box;
+
+  /* start transparent so the fade is visible */
+  background-color: rgba(42, 42, 42, 0);
+  /* include background-color in the transition */
+  transition: border-color 120ms ease-in-out, background-color 120ms ease-in-out;
+}
+
+#hotspot-qr:hover {
+  border-color: var(--portal-green);
+  background-color: rgba(42, 42, 42, 1);
+}
+
+/* Hint text (under password, right-aligned; forced 0.5rem gap) */
+.qr-hint {
+  margin-top: .5rem !important;
+  color: var(--portal-red);
+  user-select: none;
+  pointer-events: none;
+  text-align: right;
+  font-size: 12px;
+}
+
+/* =========================================
+   10) Password Visibility Toggle (eye)
+   ========================================= */
+/* JS INTERACTION: Elements/classes injected & toggled by portal.js §18 */
+.pw-wrap {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+.with-eye { padding-right: 2.4rem !important; }
+
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.6rem;
+  transform: translateY(calc(-50% - 3px));
+  width: 2rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.pw-toggle:hover,
+.pw-toggle:focus-visible { opacity: 1; outline: none; }
+
+/* JS INTERACTION: portal.js §18 toggles [data-visible='true'] */
+.pw-toggle::before {
+  content: "";
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 1.25rem 1.25rem;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>\
+<path fill='%230b0b0b' d='M12 5c-5.5 0-9.5 4.5-10 6.9c.5 2.4 4.5 6.9 10 6.9s9.5-4.5 10-6.9C21.5 9.5 17.5 5 12 5zm0 11a4 4 0 1 1 0-8a4 4 0 0 1 0 8zm0-2.5a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3z'/>\
+</svg>");
+}
+
+.pw-toggle[data-visible='true']::before {
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>\
+<path fill='%230b0b0b' d='M12 5c-5.5 0-9.5 4.5-10 6.9c.5 2.4 4.5 6.9 10 6.9s9.5-4.5 10-6.9C21.5 9.5 17.5 5 12 5zm0 11a4 4 0 1 1 0-8a4 4 0 0 1 0 8zm0-2.5a1.5 1.5 0 1 0 0-3a1.5 1.5 0 0 0 0 3z'/>\
+<line x1='4' y1='4' x2='20' y2='20' stroke='%230b0b0b' stroke-width='2' stroke-linecap='round'/>\
+</svg>");
+}
+
+/* =========================================
+   11) Tor Notice Card (fade + colors + links)
+   ========================================= */
+/* JS INTERACTION: Visibility driven by portal.js §14 updateTorNotice()
+   also set by §14 setTorUiFinal() / applySvcStatusToDom() */
+#tor-ascii-card {
+  opacity: 0;
+  visibility: hidden;
+  background: transparent;
+  color: var(--portal-red);
+  font-weight: 600;
+  border: 1px solid var(--portal-red);
+  border-radius: 5px;
+  text-align: center;
+  transition: opacity 180ms ease-in-out, visibility 0s linear 180ms;
+
+  /* remove inherited blur */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#tor-ascii-card.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+#tor-ascii-card .tor-warning {
+  text-transform: uppercase;
+}
+
+#tor-ascii-card a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+#tor-ascii-card a:hover {
+  color: var(--portal-green);
+}
+
+/* =========================================
+   12) Offline Notice Card (loops)
+   ========================================= */
+/* JS INTERACTION: portal.js §14 updateOfflineNotice()
+   - toggles .is-looping and .no-transition
+   - manages opacity and transitionend cleanup
+   Also triggered during flows in §12 (disconnect) and initialized in §17 */
+#offline-ascii-card {
+  opacity: 0;
+  visibility: hidden;
+  margin-top: 10rem;
+  background: transparent;
+  color: var(--portal-red);
+  font-size: 17px;
+  user-select: none;
+  pointer-events: none;
+  font-weight: 700;                 /* bold */
+  border: none;                     /* <-- no border */
+  border-radius: 5px;               /* harmless with no border, keep if you like */
+  text-align: center;
+  transition: opacity 180ms ease-in-out, visibility 0s linear 180ms;
+
+  /* no blur, same as tor card */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#offline-ascii-card .offline-pre {
+  margin: 0;
+  white-space: pre;
+}
+
+/* When shown + looping, keep visible and run pulse indefinitely
+   JS INTERACTION: portal.js §14 sets .is-looping */
+#offline-ascii-card.is-looping {
+  opacity: 1;
+  visibility: visible;
+  animation: offlinePulse 3.3s ease-in-out infinite;
+}
+
+/* Disable opacity transition while the looping animation is active
+   JS INTERACTION: portal.js §14 toggles .no-transition */
+#offline-ascii-card.no-transition {
+  transition: none !important;
+}
+
+@keyframes offlinePulse {
+  0%   { opacity: 0; }
+  50%  { opacity: 1; }
+  100% { opacity: 0; }
+}
