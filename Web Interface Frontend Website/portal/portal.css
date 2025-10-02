@@ -567,6 +567,10 @@ label[for="hotspot-password"] {
   /* remove inherited blur */
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+
+  /* disable interaction by default */
+  user-select: none;
+  pointer-events: none;
 }
 
 #tor-ascii-card.is-visible {
@@ -578,7 +582,10 @@ label[for="hotspot-password"] {
   text-transform: uppercase;
 }
 
+/* Re-enable interaction ONLY for links */
 #tor-ascii-card a {
+  pointer-events: auto;
+  user-select: text;
   color: inherit;
   text-decoration: underline;
 }
