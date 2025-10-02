@@ -3043,7 +3043,7 @@ Set the correct ownership:
 sudo chown -R www-data:www-data /var/www/going.dark
 ```
 
-#### 3. Configure NGINX as a reverse proxy for Going.Dark:
+#### 3. Configure *NGINX* as a reverse proxy for Going.Dark:
 
 Create the *NGINX* configuration:
 
@@ -3216,7 +3216,7 @@ echo 'server {
         # ---- Rewrite in-body root-relative URLs (HTML/CSS/JS/JSON) ----
         proxy_set_header Accept-Encoding "";   # allow sub_filter to see text (disable upstream compression)
         sub_filter_once off;
-        sub_filter_types text/html text/css application/javascript application/json;
+        sub_filter_types text/css application/javascript application/json;
 
         sub_filter 'href="/'               'href="/adguard/';
         sub_filter 'src="/'                'src="/adguard/';
@@ -3243,7 +3243,8 @@ server {
     listen 192.168.77.1:80;
     server_name going.dark;
     return 301 https://$host$request_uri;
-}' | sudo tee /etc/nginx/sites-available/nginx-goingdark > /dev/null
+}
+' | sudo tee /etc/nginx/sites-available/nginx-goingdark > /dev/null
 ```
 
 At this stage, the static web page and Flask applications (`portal.py` and `config.py`) are not yet installed or running.  
@@ -3544,7 +3545,7 @@ sudo curl -fL -o /var/www/going.dark/assets/js/drawers.js "https://codeberg.org/
 sudo curl -fL -o /var/www/going.dark/assets/js/power.js "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/js/power.js"
 ```
 
-Download all fonts and icons:
+Download icons and fonts:
 
 ```
 sudo curl -fL -o /var/www/going.dark/assets/favicon.png "https://codeberg.org/term7/Going-Dark/raw/branch/main/Web%20Interface%20Frontend%20Website/assets/favicon.png"

@@ -106,7 +106,7 @@ server {
         # ---- Rewrite in-body root-relative URLs (HTML/CSS/JS/JSON) ----
         proxy_set_header Accept-Encoding "";   # allow sub_filter to see text (disable upstream compression)
         sub_filter_once off;
-        sub_filter_types text/html text/css application/javascript application/json;
+        sub_filter_types text/css application/javascript application/json;
 
         sub_filter 'href="/'               'href="/adguard/';
         sub_filter 'src="/'                'src="/adguard/';
