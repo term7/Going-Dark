@@ -1441,6 +1441,25 @@ echo 'server:
     local-zone: "77.168.192.in-addr.arpa." transparent
     local-data-ptr: "192.168.77.1 usb0.local"
 
+######### CUSTOM RULES TO REACH LAN NETWORK #########
+
+    # Use LAN DNS for private domain "lan."
+    # Adjust "lan" to your private lan domain
+    private-domain: "lan"
+    private-address: 192.168.0.0/16
+    domain-insecure: "lan."
+
+    # EXAMPLE: Local override for the router hostname
+    # Uncomment and adjust "router.lan" to match your setup
+    # local-zone: "lan." transparent
+    # local-data: "router.lan. IN A 192.168.1.1"
+
+forward-zone:
+    name: "1.168.192.in-addr.arpa."
+    forward-addr: 192.168.1.1
+
+#####################################################
+
 # Allow Unbound to read hostnames from DHCP leases
 auth-zone:
     name: "37.168.192.in-addr.arpa."
@@ -2423,6 +2442,16 @@ Disable auto-connect for this VPN profile (we’ll activate it manually):
 sudo nmcli con modify term7.wireguard connection.autoconnect no
 ```
 
+If you have WireGuard installed on your home router and you want to be able to reach the configuration website and services in your browser via the VPN, add the required routes for LAN access (we assume your router's web interface is 192.168.1.1):
+```
+sudo nmcli connection modify "term7.wireguard" +ipv4.routes "192.168.1.0/24"
+```
+
+Additionally set the recommended MTU:
+```
+sudo nmcli connection modify "term7.wireguard" wireguard.mtu 1420
+```
+
 #### 3. Setup WireGuard Firewall:
 
 When *WireGuard* is active, we want to adjust our firewall so that traffic is routed through the VPN (`term7.wireguard`) instead of the default Ethernet or Wi-Fi interface.
@@ -2446,6 +2475,23 @@ Update the interface definition in the new config to route traffic via the WireG
 ```
 sudo sed -i '/DEV_WORLD = {/c\define DEV_WORLD = { term7.wireguard }' ~/script/nftables/wireguard.conf
 
+```
+
+Insert this section into the firewall to ensure that TCP sessions never try to send packets too large to fit through the tunnel.
+This happens automatically at the firewall, so you don’t have to manually adjust MTU settings on clients:
+
+```
+sed -i '/^# ----- IPv6: drop all traffic -----/i \
+# ----- MSS clamp for usb0/wlan0 -> WireGuard (avoid PMTU blackholes) -----\
+table inet mangle {\
+    chain fwd_mss {\
+        type filter hook forward priority mangle; policy accept;\
+\
+        # Clamp SYN MSS to 1340 when forwarding from private LAN to WireGuard\
+        iifname { usb0, wlan0 } oifname $DEV_WORLD tcp flags syn tcp option maxseg size set 1340\
+    }\
+}\
+' ~/script/nftables/wireguard.conf
 ```
 
 #### 4. Dynamically Apply Firewall Rules Using a Dispatcher Script:
