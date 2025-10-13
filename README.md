@@ -2449,7 +2449,7 @@ sudo nmcli connection modify "term7.wireguard" +ipv4.routes "192.168.1.0/24"
 
 Additionally set the recommended MTU:
 ```
-sudo nmcli connection modify "term7.wireguard" wireguard.mtu 1420
+sudo nmcli connection modify "term7.wireguard" wireguard.mtu 1380
 ```
 
 #### 3. Setup WireGuard Firewall:
